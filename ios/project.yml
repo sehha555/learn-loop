@@ -10,8 +10,11 @@ settings:
     MARKETING_VERSION: "0.1"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.9"
-    # 免費 Apple ID 簽章：Xcode 自動管理，不指定 team
     CODE_SIGN_STYLE: Automatic
+    # 免費 Apple ID 的 Personal Team。裝進自己的 iPad 夠用，
+    # 但拿不到 App Group（那要付費開發者帳號），所以主 app 和分享浮層
+    # 目前各存各的樹 —— 見 CardStore.isShared
+    DEVELOPMENT_TEAM: SBQBLH3786
     TARGETED_DEVICE_FAMILY: "2" # 只做 iPad
 
 targets:
