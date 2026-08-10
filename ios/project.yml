@@ -21,14 +21,18 @@ targets:
     sources:
       - LearnLoop
       - Shared
+    info:
+      path: LearnLoop/Info.plist
+      properties:
+        CFBundleDisplayName: LearnLoop
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sehha555.learnloop
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: >-
-          UIInterfaceOrientationPortrait
-          UIInterfaceOrientationLandscapeLeft
-          UIInterfaceOrientationLandscapeRight
     dependencies:
       - target: ShareExtension
         embed: true
