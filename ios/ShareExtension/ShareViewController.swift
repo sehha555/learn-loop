@@ -94,7 +94,7 @@ struct ShareRootView: View {
 			return
 		}
 		do {
-			let result = try await ClaudeClient(apiKey: store.apiKey).diagnose(image: image)
+			let result = try await AIClient(apiKey: store.apiKey).diagnose(image: image)
 			let topic = Card(
 				title: result.title,
 				body: result.diagnosis,

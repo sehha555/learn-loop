@@ -85,10 +85,14 @@ struct SettingsView: View {
 	var body: some View {
 		NavigationStack {
 			Form {
-				Section("Anthropic API key") {
-					SecureField("sk-ant-...", text: $key)
+				Section {
+					SecureField("AIza... 或 sk-ant-...", text: $key)
 						.textInputAutocapitalization(.never)
 						.autocorrectionDisabled()
+				} header: {
+					Text("API key")
+				} footer: {
+					Text("Google AI Studio 的 key（AIza 開頭）有免費額度，貼上就會走 Gemini。貼 Anthropic 的 key（sk-ant 開頭）就走 Claude。")
 				}
 				if !store.isShared {
 					Section {
