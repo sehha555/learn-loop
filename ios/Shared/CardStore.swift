@@ -56,15 +56,26 @@ final class CardStore: ObservableObject {
 	}
 
 	/// 展開某個節點：填上內容，並把模型延伸出來的新問題掛成子節點
-	func expand(cardID: UUID, body: String, followUps: [String]) {
+	func expand(cardID: UUID, body: String, followUps: [AIClient.Point]) {
 		for index in topics.indices {
 			let hit = topics[index].update(id: cardID) { card in
 				card.body = body
-				card.children.append(contentsOf: followUps.map { Card(title: $0) })
+				card.children.append(
+					contentsOf: followUps.map { Card(title: $0.title, kind: $0.kind) })
 			}
 			if hit { break }
 		}
 		save()
+	}
+
+	/// 使用者自己加的點。AI 沒猜到的那些，正好告訴我們猜得準不準。
+	/// 回傳新節點的 id，讓呼叫端接著展開它。
+	func addCustom(topicID: UUID, title: String) -> UUID? {
+		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return nil }
+		let card = Card(title: title, kind: .custom)
+		topics[index].children.append(card)
+		save()
+		return card.id
 	}
 
 	/// 找出某個節點所在的題目與路徑，追問時當脈絡送給模型

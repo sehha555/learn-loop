@@ -11,6 +11,7 @@ struct CardTreeView: View {
 
 	@State private var loading: Set<UUID> = []
 	@State private var collapsed: Set<UUID> = []
+	@State private var ownQuestion = ""
 	@State private var errorText: String?
 
 	private var topic: Card? { store.topics.first { $0.id == topicID } }
@@ -25,6 +26,9 @@ struct CardTreeView: View {
 					ForEach(visibleNodes(of: topic), id: \.card.id) { item in
 						node(item.card, depth: item.depth)
 					}
+
+					askOwn(topic)
+						.padding(.top, 8)
 
 					if topic.pendingCount > 0 {
 						Text("還有 \(topic.pendingCount) 個沒展開")
@@ -147,14 +151,69 @@ struct CardTreeView: View {
 		if card.isExpanded {
 			Image(systemName: collapsed.contains(card.id) ? "chevron.right" : "chevron.down")
 				.font(.caption2.weight(.bold))
-				.foregroundStyle(Color.accentColor)
-				.frame(width: 12)
+				.foregroundStyle(Self.tint(card.kind))
+				.frame(width: 14)
 		} else {
-			Image(systemName: "plus")
+			Text(Self.mark(card.kind))
 				.font(.caption2.weight(.bold))
-				.foregroundStyle(.secondary)
-				.frame(width: 12)
+				.foregroundStyle(Self.tint(card.kind))
+				.frame(width: 14)
 		}
+	}
+
+	/// 四種點各有記號，一眼看得出這是「疑問」還是「有雷」還是「我自己加的」
+	private static func mark(_ kind: Card.Kind) -> String {
+		switch kind {
+		case .question: "？"
+		case .supplement: "＋"
+		case .trap: "！"
+		case .extend: "↗"
+		case .custom: "✎"
+		case .topic: "◆"
+		}
+	}
+
+	private static func tint(_ kind: Card.Kind) -> Color {
+		switch kind {
+		case .question: .accentColor
+		case .supplement: .teal
+		case .trap: .orange
+		case .extend: .purple
+		case .custom: .pink
+		case .topic: .accentColor
+		}
+	}
+
+	// MARK: - 自己加一個點
+
+	private func askOwn(_ topic: Card) -> some View {
+		HStack(spacing: 8) {
+			Text("✎").font(.caption2.weight(.bold)).foregroundStyle(.pink).frame(width: 14)
+			TextField("我想問別的…", text: $ownQuestion)
+				.font(.subheadline)
+				.submitLabel(.go)
+				.onSubmit { Task { await askOwn(in: topic.id) } }
+			if !ownQuestion.trimmingCharacters(in: .whitespaces).isEmpty {
+				Button("問") { Task { await askOwn(in: topic.id) } }
+					.font(.subheadline.weight(.semibold))
+					.buttonStyle(.borderless)
+			}
+		}
+		.padding(.vertical, 7)
+		.padding(.horizontal, 10)
+		.background(Color.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+	}
+
+	private func askOwn(in topicID: UUID) async {
+		let text = ownQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !text.isEmpty, let id = store.addCustom(topicID: topicID, title: text) else {
+			return
+		}
+		ownQuestion = ""
+		guard let card = store.topics.first(where: { $0.id == topicID })?
+			.children.first(where: { $0.id == id })
+		else { return }
+		await expand(card)
 	}
 
 	// MARK: - 展開

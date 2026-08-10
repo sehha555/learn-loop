@@ -42,40 +42,75 @@ struct AIClient {
 
 	// MARK: - 診斷一張截圖
 
-	struct Diagnosis: Decodable {
+	struct Point: Decodable {
+		let kind: Card.Kind
 		let title: String
-		let diagnosis: String
-		let points: [String]
 	}
 
-	/// 這段調過三輪。關鍵是 points 要寫成「他心裡那句話」而不是課本標題 ——
-	/// 模型的預設會吐出「一次項係數與常數項的關聯性」這種一看就不想點的東西。
+	struct Diagnosis: Decodable {
+		let title: String
+		/// stuck / done / blank —— 現在只用來除錯，UI 不顯示
+		let situation: String
+		let status: String
+		let points: [Point]
+	}
+
+	/// 這段調過幾輪，兩個關鍵：
+	/// 一是先分辨他「卡住 / 寫完 / 還沒動筆」—— 卡住的頻率遠高於寫錯，
+	/// 只做批改的話會對著還沒寫完的算式講「你第三行錯了」。
+	/// 二是 points 要有不同種類，全生成疑問句的話「想補充」「有雷」出不來。
 	private static let diagnosePrompt = """
 	你是坐在旁邊的助教，正在看使用者手寫的東西。
 
-	diagnosis：一句話，直接對他說「你」。講他卡在哪、或這段在幹嘛。
-	不要講解、不要列步驟、不要鼓勵、不要說「學生」。
+	第一步，先判斷他現在處在哪個狀態（situation）：
+	- "stuck"：寫到一半停住了。有塗改、有問號、算式沒寫完、同一步重寫好幾次。
+	- "done"：寫完了，有完整的答案或結論。
+	- "blank"：只有題目、還沒開始算。
 
-	points：他心裡可能正在冒出來、但你這次刻意不回答的疑問。3 到 5 個。
-	用他會用的講法，像是他自己在心裡問的那句話 —— 例如「為什麼是除以 2 再平方」、
-	「25 為什麼不對」。
-	不要寫成課本標題，例如「一次項係數與常數項的關聯性」「分配律的驗算」這種一看
-	就不想點的東西。
+	第二步，依狀態寫 status 這一句話，直接對他說「你」：
+	- stuck → 講他卡在哪一步，然後給下一步「該想什麼」的方向。
+	  絕對不要直接給答案或算給他看，給了他就變成抄的。
+	- done → 講他這段在幹嘛；如果哪一行開始歪掉就指出是哪一行，但不要說為什麼錯。
+	- blank → 講這題在問什麼、可以從哪裡下手看。
+	只寫一句。不要講解、不要列步驟、不要鼓勵、不要說「學生」。
 
-	title：這一題的名字，四到八個字。
+	第三步，給 3 到 5 個 points。每個有 kind 和 title 兩個欄位。
+	kind 只能是這四種，而且不要全部集中在同一種：
+	- "question"：他心裡可能正在冒出來的疑問。用他會用的講法，
+	  例如「25 為什麼不對」，不要寫成課本標題。
+	- "supplement"：這題沒寫到、但接得上的東西。
+	- "trap"：這個地方很多人會踩雷。
+	- "extend"：更難或更一般的版本。
+	title 是這個點的標題，一句話，不要超過 20 個字。
+	不要在 title 裡回答它自己 —— 內容是他點下去才生的。
+
+	title（最外層那個）是這一題的名字，四到八個字。
 
 	全部繁體中文。數學符號用純文字寫（x²、√2、(x+3)²），
 	絕對不要用 LaTeX、不要用 $ 符號、不要用 markdown。
 	"""
 
+	private static let pointSchema: [String: Any] = [
+		"type": "object",
+		"properties": [
+			"kind": [
+				"type": "string",
+				"enum": ["question", "supplement", "trap", "extend"],
+			],
+			"title": ["type": "string"],
+		],
+		"required": ["kind", "title"],
+	]
+
 	private static let diagnoseSchema: [String: Any] = [
 		"type": "object",
 		"properties": [
 			"title": ["type": "string"],
-			"diagnosis": ["type": "string"],
-			"points": ["type": "array", "items": ["type": "string"]],
+			"situation": ["type": "string", "enum": ["stuck", "done", "blank"]],
+			"status": ["type": "string"],
+			"points": ["type": "array", "items": pointSchema],
 		],
-		"required": ["title", "diagnosis", "points"],
+		"required": ["title", "situation", "status", "points"],
 	]
 
 	func diagnose(image: UIImage) async throws -> Diagnosis {
@@ -92,7 +127,7 @@ struct AIClient {
 
 	struct Expansion: Decodable {
 		let body: String
-		let followUps: [String]
+		let followUps: [Point]
 
 		enum CodingKeys: String, CodingKey {
 			case body
@@ -104,7 +139,7 @@ struct AIClient {
 		"type": "object",
 		"properties": [
 			"body": ["type": "string"],
-			"follow_ups": ["type": "array", "items": ["type": "string"]],
+			"follow_ups": ["type": "array", "items": pointSchema],
 		],
 		"required": ["body", "follow_ups"],
 	]
@@ -120,8 +155,9 @@ struct AIClient {
 
 		規則：
 		1. body 控制在三到五句，直接對他說「你」，講重點，不要前言不要總結。
-		2. follow_ups 是這段解釋之後「新冒出來、他可能會想追問」的點，
-		   0 到 3 個，寫成他心裡會問的那句話。沒有就給空陣列，不要硬湊。
+		2. follow_ups 是這段解釋之後新冒出來、他可能會想再點的點，0 到 3 個。
+		   每個有 kind（question / supplement / trap / extend）和 title。
+		   沒有就給空陣列，不要硬湊。
 		3. 不要重複上層已經講過的東西。
 		4. 全部繁體中文。數學符號用純文字寫（x²、√2、(x+3)²），
 		   絕對不要用 LaTeX、不要用 $ 符號、不要用 markdown。
