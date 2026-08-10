@@ -75,12 +75,6 @@ extension Card {
 		return false
 	}
 
-	/// 把子樹攤成一維清單，每筆帶著自己的層級。
-	/// SwiftUI 的 View 不能遞迴（opaque 型別會自我參照），所以層級改用縮排表達。
-	func flattened(depth: Int = 0) -> [(card: Card, depth: Int)] {
-		[(self, depth)] + children.flatMap { $0.flattened(depth: depth + 1) }
-	}
-
 	/// 從根到指定節點的標題路徑 —— 追問時要把這條路徑餵給模型當脈絡
 	func path(to target: UUID) -> [String]? {
 		if id == target { return [title] }
