@@ -50,8 +50,10 @@ struct ShareRootView: View {
 
 	@StateObject private var store = CardStore()
 	@State private var phase: Phase = .working
+	@State private var keyInput = ""
 
 	private enum Phase {
+		case needsKey
 		case working
 		case ready(UUID)
 		case failed(String)
@@ -61,6 +63,9 @@ struct ShareRootView: View {
 		NavigationStack {
 			Group {
 				switch phase {
+				case .needsKey:
+					keyForm
+
 				case .working:
 					VStack(spacing: 12) {
 						ProgressView()
@@ -88,7 +93,33 @@ struct ShareRootView: View {
 		.task { await run() }
 	}
 
+	/// 免費簽章下浮層和主 app 是兩個看不見彼此的沙盒，key 要各存一次。
+	/// 之後換成付費帳號、App Group 生效後這個畫面就不會再出現。
+	private var keyForm: some View {
+		Form {
+			Section {
+				SecureField("AIza... 或 sk-ant-...", text: $keyInput)
+					.textInputAutocapitalization(.never)
+					.autocorrectionDisabled()
+				Button("儲存並開始") {
+					store.apiKey = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+					phase = .working
+					Task { await run() }
+				}
+				.disabled(keyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+			} header: {
+				Text("這裡也要貼一次 API key")
+			} footer: {
+				Text("免費簽章下，這個浮層跟主 app 是分開的，看不到彼此存的東西。只要貼這一次。")
+			}
+		}
+	}
+
 	private func run() async {
+		guard !store.apiKey.isEmpty else {
+			phase = .needsKey
+			return
+		}
 		guard let image = await loadImage() else {
 			phase = .failed("分享進來的東西不是圖片")
 			return
