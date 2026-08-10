@@ -8,6 +8,9 @@
 		"allowJs": true,
 		"noImplicitAny": true,
 		"moduleResolution": "node",
+		// 測試用 node --test 直接跑 .ts，import 必須帶副檔名
+		"allowImportingTsExtensions": true,
+		"allowSyntheticDefaultImports": true,
 		"importHelpers": true,
 		"isolatedModules": true,
 		"strictNullChecks": true,
