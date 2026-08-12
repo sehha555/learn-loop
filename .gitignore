@@ -4,3 +4,4 @@ ios/LearnLoop.xcodeproj/
 ios/build/
 ios/DerivedData/
 .DS_Store
+.superpowers/
