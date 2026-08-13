@@ -1,4 +1,17 @@
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// 剪貼簿貼進來的圖。PasteButton 要求 Transferable，UIImage 沒有，包一層。
+struct PastedImage: Transferable {
+	let image: UIImage
+
+	static var transferRepresentation: some TransferRepresentation {
+		DataRepresentation(importedContentType: .image) { data in
+			guard let image = UIImage(data: data) else { throw AIError.badImage }
+			return PastedImage(image: image)
+		}
+	}
+}
 
 @main
 struct LearnLoopApp: App {
@@ -20,20 +33,19 @@ struct LearnLoopApp: App {
 struct TopicListView: View {
 	@ObservedObject var store: CardStore
 	@State private var showingSettings = false
+	@State private var analyzing = false
+	@State private var path: [UUID] = []
+	@State private var errorMessage: String?
 
 	var body: some View {
-		NavigationStack {
+		NavigationStack(path: $path) {
 			Group {
 				if store.topics.isEmpty {
 					empty
 				} else {
 					List {
 						ForEach(store.topics) { topic in
-							NavigationLink {
-								CardTreeView(topicID: topic.id, store: store)
-									.navigationTitle(topic.title)
-									.navigationBarTitleDisplayMode(.inline)
-							} label: {
+							NavigationLink(value: topic.id) {
 								row(topic)
 							}
 						}
@@ -50,6 +62,56 @@ struct TopicListView: View {
 			.sheet(isPresented: $showingSettings) {
 				SettingsView(store: store)
 			}
+			.safeAreaInset(edge: .bottom) { pasteBar }
+			// 清單點進去和貼上分析完自動跳轉都走這一條路
+			.navigationDestination(for: UUID.self) { id in
+				CardTreeView(topicID: id, store: store)
+					.navigationTitle(store.topics.first { $0.id == id }?.title ?? "")
+					.navigationBarTitleDisplayMode(.inline)
+			}
+			.alert("沒辦法處理", isPresented: .constant(errorMessage != nil)) {
+				Button("好") { errorMessage = nil }
+			} message: {
+				Text(errorMessage ?? "")
+			}
+		}
+	}
+
+	/// Slide Over 用法的入口：在 GoodNotes 截圖（或圈選複製）後，滑出來按這顆。
+	/// 用系統的 PasteButton 才不會每次都跳「允許貼上？」的確認框。
+	private var pasteBar: some View {
+		Group {
+			if analyzing {
+				HStack(spacing: 8) {
+					ProgressView()
+					Text("看你寫了什麼…").foregroundStyle(.secondary)
+				}
+			} else {
+				PasteButton(payloadType: PastedImage.self) { pasted in
+					guard let first = pasted.first else { return }
+					Task { @MainActor in await analyze(first.image) }
+				}
+				.buttonBorderShape(.capsule)
+			}
+		}
+		.frame(maxWidth: .infinity)
+		.padding(.vertical, 10)
+		.background(.bar)
+	}
+
+	@MainActor
+	private func analyze(_ image: UIImage) async {
+		guard !store.apiKey.isEmpty else {
+			showingSettings = true
+			return
+		}
+		analyzing = true
+		defer { analyzing = false }
+		do {
+			// 分析完直接跳進那棵樹，不用自己從清單找
+			path.append(try await store.analyze(image: image))
+		} catch {
+			errorMessage = error.localizedDescription
 		}
 	}
 
@@ -72,7 +134,7 @@ struct TopicListView: View {
 		ContentUnavailableView {
 			Label("還沒有東西", systemImage: "tray")
 		} description: {
-			Text("在 GoodNotes 圈一段寫過的內容，按分享，選 LearnLoop。")
+			Text("在 GoodNotes 截圖或圈選複製，回到這裡按下面的「貼上」。")
 		}
 	}
 }
@@ -81,6 +143,7 @@ struct SettingsView: View {
 	@ObservedObject var store: CardStore
 	@Environment(\.dismiss) private var dismiss
 	@State private var key = ""
+	@State private var style: TeachingStyle = .plain
 
 	var body: some View {
 		NavigationStack {
@@ -93,6 +156,19 @@ struct SettingsView: View {
 					Text("API key")
 				} footer: {
 					Text("Google AI Studio 的 key（AIza 開頭）有免費額度，貼上就會走 Gemini。貼 Anthropic 的 key（sk-ant 開頭）就走 Claude。")
+				}
+				Section {
+					Picker("口吻", selection: $style) {
+						ForEach(TeachingStyle.allCases, id: \.self) { style in
+							Text(style.label).tag(style)
+						}
+					}
+					.pickerStyle(.inline)
+					.labelsHidden()
+				} header: {
+					Text("點開步驟時的講法")
+				} footer: {
+					Text("零基礎白話：每個術語都解釋、步驟切最細。引導提問：不給完答案，每步留一個小問題推你想。精簡條列：直接講重點。")
 				}
 				if !store.isShared {
 					Section {
@@ -107,11 +183,15 @@ struct SettingsView: View {
 				ToolbarItem(placement: .confirmationAction) {
 					Button("完成") {
 						store.apiKey = key
+						store.teachingStyle = style
 						dismiss()
 					}
 				}
 			}
-			.onAppear { key = store.apiKey }
+			.onAppear {
+				key = store.apiKey
+				style = store.teachingStyle
+			}
 		}
 	}
 }

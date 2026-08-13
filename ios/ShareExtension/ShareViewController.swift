@@ -125,15 +125,7 @@ struct ShareRootView: View {
 			return
 		}
 		do {
-			let result = try await AIClient(apiKey: store.apiKey).diagnose(image: image)
-			let topic = Card(
-				title: result.title,
-				body: result.status,
-				kind: .topic,
-				children: result.points.map { Card(title: $0.title, kind: $0.kind) }
-			)
-			store.insert(topic)
-			phase = .ready(topic.id)
+			phase = .ready(try await store.analyze(image: image))
 		} catch {
 			phase = .failed(error.localizedDescription)
 		}

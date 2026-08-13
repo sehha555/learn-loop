@@ -29,8 +29,10 @@ targets:
       properties:
         CFBundleDisplayName: LearnLoop
         UILaunchScreen: {}
+        # 四個方向都要支援，iPad 多工（Slide Over / 並排視窗）才會開放給這個 app
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
     settings:

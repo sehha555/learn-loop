@@ -9,7 +9,8 @@ struct Card: Identifiable, Codable, Hashable {
 	/// 這些同樣有用的方向就永遠出不來。
 	enum Kind: String, Codable {
 		case topic       // 題目本身
-		case question    // 你可能正想問的
+		case step        // 解這題客觀要走的一步 —— 不是猜的，題目診斷時才會出現
+		case question    // 你可能正想問的 —— 只在追問（expand）新冒出的點裡出現
 		case supplement  // 這題沒寫到但接得上的
 		case trap        // 很多人在這裡踩雷
 		case extend      // 更難或更一般的版本
@@ -24,6 +25,9 @@ struct Card: Identifiable, Codable, Hashable {
 	var kind: Kind
 	var children: [Card]
 	var createdAt: Date
+	/// 這一題用到的概念名（AI 抽的，2-4 個）。只有 topic 層有，子節點都是空的。
+	/// 跨題目累積起來就是之後 wiki / graph 的地基。
+	var concepts: [String]
 
 	init(
 		id: UUID = UUID(),
@@ -31,7 +35,8 @@ struct Card: Identifiable, Codable, Hashable {
 		body: String? = nil,
 		kind: Kind = .question,
 		children: [Card] = [],
-		createdAt: Date = Date()
+		createdAt: Date = Date(),
+		concepts: [String] = []
 	) {
 		self.id = id
 		self.title = title
@@ -39,6 +44,7 @@ struct Card: Identifiable, Codable, Hashable {
 		self.kind = kind
 		self.children = children
 		self.createdAt = createdAt
+		self.concepts = concepts
 	}
 
 	/// 手寫的 init —— kind 是後來才加的欄位，舊存檔沒有它。
@@ -51,6 +57,7 @@ struct Card: Identifiable, Codable, Hashable {
 		kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .question
 		children = try container.decodeIfPresent([Card].self, forKey: .children) ?? []
 		createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+		concepts = try container.decodeIfPresent([String].self, forKey: .concepts) ?? []
 	}
 
 	var isExpanded: Bool { body != nil }

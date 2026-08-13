@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// 樹的儲存。主 app 和分享浮層要看到同一份資料，所以放在 App Group 的共享目錄。
 ///
@@ -33,6 +34,15 @@ final class CardStore: ObservableObject {
 	var apiKey: String {
 		get { defaults.string(forKey: "anthropicAPIKey") ?? "" }
 		set { defaults.set(newValue, forKey: "anthropicAPIKey") }
+	}
+
+	/// 教學口吻，設定頁切換
+	var teachingStyle: TeachingStyle {
+		get {
+			defaults.string(forKey: "teachingStyle")
+				.flatMap(TeachingStyle.init(rawValue:)) ?? .plain
+		}
+		set { defaults.set(newValue.rawValue, forKey: "teachingStyle") }
 	}
 
 	// MARK: - 讀寫
@@ -89,5 +99,36 @@ final class CardStore: ObservableObject {
 	func delete(topicID: UUID) {
 		topics.removeAll { $0.id == topicID }
 		save()
+	}
+
+	/// 最近問過的概念名（去重、新到舊）。
+	/// 餵給 prompt 讓模型重用既有名字（不然「和角公式」「和角定理」會變兩個節點）。
+	func recentConceptNames(limit: Int) -> [String] {
+		var seen = Set<String>()
+		// topics 本來就最新在前
+		let names = topics.flatMap(\.concepts).filter { seen.insert($0).inserted }
+		return Array(names.prefix(limit))
+	}
+
+	/// 這個概念出現在幾題裡（含正在看的那題）——「第 N 次卡了」的 N。
+	/// 次數只在這裡定義,view 只問不算。
+	func conceptCount(_ name: String) -> Int {
+		topics.reduce(0) { $0 + ($1.concepts.contains(name) ? 1 : 0) }
+	}
+
+	/// 貼上 / 分享進來的完整流程：概念清單 → 診斷 → 組題目 → 存檔，回傳新題 id。
+	/// 主 app 和分享浮層共用這一份，免得改流程時漏掉其中一邊。
+	func analyze(image: UIImage) async throws -> UUID {
+		let result = try await AIClient(apiKey: apiKey)
+			.diagnose(image: image, knownConcepts: recentConceptNames(limit: 50))
+		let topic = Card(
+			title: result.title,
+			body: result.status,
+			kind: .topic,
+			children: result.points.map { Card(title: $0.title, kind: $0.kind) },
+			concepts: result.concepts
+		)
+		insert(topic)
+		return topic.id
 	}
 }
