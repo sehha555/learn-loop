@@ -40,6 +40,27 @@ final class CardStore: ObservableObject {
 		set { defaults.set(newValue, forKey: "anthropicAPIKey") }
 	}
 
+	/// Mac 中繼站位址（走 Claude Code 訂閱，不吃 API）。空字串＝沒在用
+	var relayAddress: String {
+		get { defaults.string(forKey: "relayAddress") ?? "" }
+		set { defaults.set(newValue, forKey: "relayAddress") }
+	}
+
+	/// 設定頁填的是「機器名」或「機器名:port」，這裡補上 scheme 和預設 port
+	var relayURL: URL? {
+		let raw = relayAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !raw.isEmpty else { return nil }
+		var components = URLComponents(string: raw.contains("://") ? raw : "http://\(raw)")
+		if components?.port == nil { components?.port = 8787 }
+		return components?.url
+	}
+
+	/// 有任一條路能打模型（key 或中繼站）就能開始分析
+	var hasProvider: Bool { !apiKey.isEmpty || relayURL != nil }
+
+	/// 打模型一律從這拿 client，中繼站設定才不會漏帶
+	var ai: AIClient { AIClient(apiKey: apiKey, relay: relayURL) }
+
 	/// 教學口吻，設定頁切換
 	var teachingStyle: TeachingStyle {
 		get {
@@ -168,7 +189,7 @@ final class CardStore: ObservableObject {
 	func analyze(image: UIImage) async throws -> UUID {
 		// JPEG 只編碼一次，上傳和存檔共用同一份
 		guard let imageData = AIClient.jpeg(from: image) else { throw AIError.badImage }
-		let result = try await AIClient(apiKey: apiKey)
+		let result = try await ai
 			.diagnose(imageJPEG: imageData, knownConcepts: recentConceptNames(limit: 50))
 		let topic = Card(
 			title: result.title,

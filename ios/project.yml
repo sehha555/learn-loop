@@ -29,6 +29,11 @@ targets:
       properties:
         CFBundleDisplayName: LearnLoop
         UILaunchScreen: {}
+        # Mac 中繼站走 http（區網 / Tailscale 內網），iOS 預設只准 https，要開例外；
+        # 連區網另外要本地網路權限，第一次連會跳系統詢問
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: 連你自己 Mac 上的中繼站，用 Claude Code 處理截圖。
         # 四個方向都要支援，iPad 多工（Slide Over / 並排視窗）才會開放給這個 app
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

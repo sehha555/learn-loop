@@ -343,7 +343,7 @@ struct CardTreeView: View {
 		loading.insert(card.id)
 		defer { loading.remove(card.id) }
 		do {
-			let result = try await AIClient(apiKey: store.apiKey).expand(
+			let result = try await store.ai.expand(
 				topic: topic.title,
 				diagnosis: topic.body ?? "",
 				path: Array(path.dropFirst()), // 第一個是題目本身，模型已經知道

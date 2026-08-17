@@ -9,7 +9,7 @@ enum AIError: LocalizedError {
 
 	var errorDescription: String? {
 		switch self {
-		case .noAPIKey: "還沒設定 API key，到主 app 的設定貼上"
+		case .noAPIKey: "還沒設定 API key 或 Mac 位址，到主 app 的設定填一個"
 		case .badImage: "這張圖讀不出來"
 		case let .http(code, message): "伺服器回 \(code)：\(message.prefix(300))"
 		case .badResponse: "回應格式看不懂"
@@ -60,6 +60,8 @@ enum TeachingStyle: String, CaseIterable {
 /// 設定頁不用多一個選單，貼哪把就用哪家。
 struct AIClient {
 	let apiKey: String
+	/// Mac 中繼站（走 Claude Code 訂閱）。有設就優先走它，失敗自動退回雲端 API
+	var relay: URL? = nil
 
 	enum Provider {
 		case google
@@ -284,6 +286,15 @@ struct AIClient {
 		toolName: String,
 		schema: [String: Any]
 	) async throws -> T {
+		if let relay {
+			do {
+				return try await callRelay(
+					relay, text: text, imageBase64: imageBase64, schema: schema)
+			} catch {
+				// Mac 睡著或連不上：有 key 就靜默退回雲端，讀書不中斷
+				if apiKey.isEmpty { throw error }
+			}
+		}
 		guard !apiKey.isEmpty else { throw AIError.noAPIKey }
 
 		let (request, extract) = switch provider {
@@ -302,6 +313,33 @@ struct AIClient {
 		}
 		let payload = try extract(data)
 		return try JSONDecoder().decode(T.self, from: payload)
+	}
+
+	// MARK: - Mac 中繼站
+
+	/// prompt 和 schema 原樣丟給 Mac，Mac 那邊叫 claude -p 處理完回 JSON。
+	/// 回應本身就是結果物件，不用再從 provider 的包裝裡挖。
+	private func callRelay<T: Decodable>(
+		_ relay: URL, text: String, imageBase64: String?, schema: [String: Any]
+	) async throws -> T {
+		// 先敲 /health，2 秒沒回就當 Mac 不在，立刻換路 —— 不讓使用者乾等連線逾時
+		var health = URLRequest(url: relay.appending(path: "health"))
+		health.timeoutInterval = 2
+		_ = try await URLSession.shared.data(for: health)
+
+		var request = URLRequest(url: relay.appending(path: "call"))
+		request.httpMethod = "POST"
+		request.setValue("application/json", forHTTPHeaderField: "content-type")
+		request.timeoutInterval = 180
+		var body: [String: Any] = ["prompt": text, "schema": schema]
+		if let imageBase64 { body["image_base64"] = imageBase64 }
+		request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+		let (data, response) = try await URLSession.shared.data(for: request)
+		if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+			throw AIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+		}
+		return try JSONDecoder().decode(T.self, from: data)
 	}
 
 	// MARK: - Google Gemini
