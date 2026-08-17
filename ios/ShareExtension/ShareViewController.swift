@@ -89,6 +89,8 @@ struct ShareRootView: View {
 					Button("完成", action: onDone)
 				}
 			}
+			// 樹頁的概念 chips 和病歷卡裡的跳轉，浮層也走同一份共用路由
+			.conceptDestinations(store: store)
 		}
 		.task { await run() }
 	}

@@ -34,7 +34,7 @@ struct TopicListView: View {
 	@ObservedObject var store: CardStore
 	@State private var showingSettings = false
 	@State private var analyzing = false
-	@State private var path: [UUID] = []
+	@State private var path = NavigationPath()
 	@State private var errorMessage: String?
 
 	var body: some View {
@@ -57,18 +57,19 @@ struct TopicListView: View {
 			}
 			.navigationTitle("知識點")
 			.toolbar {
+				NavigationLink {
+					ConceptListView(store: store)
+				} label: {
+					Label("概念", systemImage: "tag")
+				}
 				Button("設定", systemImage: "gearshape") { showingSettings = true }
 			}
 			.sheet(isPresented: $showingSettings) {
 				SettingsView(store: store)
 			}
 			.safeAreaInset(edge: .bottom) { pasteBar }
-			// 清單點進去和貼上分析完自動跳轉都走這一條路
-			.navigationDestination(for: UUID.self) { id in
-				CardTreeView(topicID: id, store: store)
-					.navigationTitle(store.topics.first { $0.id == id }?.title ?? "")
-					.navigationBarTitleDisplayMode(.inline)
-			}
+			// 清單點進去、貼上分析完自動跳轉、概念相關的頁全走這一份共用路由
+			.conceptDestinations(store: store)
 			.alert("沒辦法處理", isPresented: .constant(errorMessage != nil)) {
 				Button("好") { errorMessage = nil }
 			} message: {

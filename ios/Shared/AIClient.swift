@@ -190,10 +190,11 @@ struct AIClient {
 		"required": ["title", "situation", "status", "is_problem", "concepts", "points"],
 	]
 
-	/// - Parameter knownConcepts: 過去累積的概念名（新到舊）。餵給模型是為了對齊 ——
-	///   同一個概念每次寫法不同的話，「你第幾次卡」就數不出來。
-	func diagnose(image: UIImage, knownConcepts: [String] = []) async throws -> Diagnosis {
-		guard let data = Self.jpeg(from: image) else { throw AIError.badImage }
+	/// - Parameters:
+	///   - imageJPEG: 已用 `jpeg(from:)` 編碼過的圖 —— 呼叫端編一次，上傳與存檔共用
+	///   - knownConcepts: 過去累積的概念名（新到舊）。餵給模型是為了對齊 ——
+	///     同一個概念每次寫法不同的話，「你第幾次卡」就數不出來。
+	func diagnose(imageJPEG: Data, knownConcepts: [String] = []) async throws -> Diagnosis {
 		var prompt = Self.diagnosePrompt
 		if !knownConcepts.isEmpty {
 			prompt += """
@@ -205,7 +206,7 @@ struct AIClient {
 		}
 		return try await call(
 			text: prompt,
-			imageBase64: data.base64EncodedString(),
+			imageBase64: imageJPEG.base64EncodedString(),
 			toolName: "record_diagnosis",
 			schema: Self.diagnoseSchema
 		)
@@ -414,8 +415,9 @@ struct AIClient {
 
 	// MARK: - 圖片
 
-	/// 長邊壓到 1568px —— 再大服務端也會自己縮，白花上傳時間和錢
-	private static func jpeg(from image: UIImage) -> Data? {
+	/// 長邊壓到 1568px —— 再大服務端也會自己縮，白花上傳時間和錢。
+	/// CardStore 存題目截圖也用這個尺寸，夠看清題目。
+	static func jpeg(from image: UIImage) -> Data? {
 		let maxSide: CGFloat = 1568
 		let scale = min(1, maxSide / max(image.size.width, image.size.height))
 		guard scale < 1 else { return image.jpegData(compressionQuality: 0.8) }

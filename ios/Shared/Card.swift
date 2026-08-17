@@ -66,6 +66,14 @@ struct Card: Identifiable, Codable, Hashable {
 	var pendingCount: Int {
 		(isExpanded ? 0 : 1) + children.reduce(0) { $0 + $1.pendingCount }
 	}
+
+	/// 子樹裡點開過的 AI 節點數（不含自己）。自己打的 custom 不算 ——
+	/// 病歷卡把那些當「你問過的問題」全文另列
+	var expandedDescendants: Int {
+		children.reduce(0) {
+			$0 + (($1.isExpanded && $1.kind != .custom) ? 1 : 0) + $1.expandedDescendants
+		}
+	}
 }
 
 extension Card {

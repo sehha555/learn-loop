@@ -16,6 +16,7 @@ final class CardStore: ObservableObject {
 	let isShared: Bool
 
 	private let fileURL: URL
+	private let imagesDir: URL
 	private let defaults: UserDefaults
 
 	init() {
@@ -25,6 +26,9 @@ final class CardStore: ObservableObject {
 		let dir = shared ?? FileManager.default.urls(
 			for: .documentDirectory, in: .userDomainMask)[0]
 		fileURL = dir.appendingPathComponent("topics.json")
+		imagesDir = dir.appendingPathComponent("images", isDirectory: true)
+		try? FileManager.default.createDirectory(
+			at: imagesDir, withIntermediateDirectories: true)
 		defaults = UserDefaults(suiteName: Self.appGroupID) ?? .standard
 		load()
 	}
@@ -98,6 +102,7 @@ final class CardStore: ObservableObject {
 
 	func delete(topicID: UUID) {
 		topics.removeAll { $0.id == topicID }
+		try? FileManager.default.removeItem(at: imageFileURL(topicID))
 		save()
 	}
 
@@ -110,17 +115,61 @@ final class CardStore: ObservableObject {
 		return Array(names.prefix(limit))
 	}
 
+	/// 用到這個概念的題目（最新在前，topics 本來就這順序）—— 病歷卡的紀錄清單
+	func topics(withConcept name: String) -> [Card] {
+		topics.filter { $0.concepts.contains(name) }
+	}
+
 	/// 這個概念出現在幾題裡（含正在看的那題）——「第 N 次卡了」的 N。
 	/// 次數只在這裡定義,view 只問不算。
 	func conceptCount(_ name: String) -> Int {
-		topics.reduce(0) { $0 + ($1.concepts.contains(name) ? 1 : 0) }
+		topics(withConcept: name).count
+	}
+
+	/// 「卡過」的門檻只在這裡定義 —— 紅字、紅框、紅色次數全問這一個
+	func isRepeated(_ name: String) -> Bool {
+		conceptCount(name) >= 2
+	}
+
+	/// 跟這個概念在同一題出現過的其他概念，常一起出現的排前面（同分照筆畫穩定排）。
+	/// 只連使用者真的卡過的東西，不叫 AI 憑空列——這也是階段 3 graph 的邊
+	func relatedConcepts(to name: String) -> [String] {
+		var counts: [String: Int] = [:]
+		for topic in topics(withConcept: name) {
+			for other in topic.concepts where other != name {
+				counts[other, default: 0] += 1
+			}
+		}
+		return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+			.map(\.key)
+	}
+
+	/// 全部概念與出現題數，常卡的在最上面（同分照筆畫穩定排）—— 總覽頁用
+	func allConcepts() -> [(name: String, count: Int)] {
+		topics.flatMap(\.concepts)
+			.reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
+			.map { (name: $0.key, count: $0.value) }
+			.sorted { $0.count == $1.count ? $0.name < $1.name : $0.count > $1.count }
+	}
+
+	// MARK: - 題目截圖
+
+	private func imageFileURL(_ topicID: UUID) -> URL {
+		imagesDir.appendingPathComponent("\(topicID.uuidString).jpg")
+	}
+
+	/// 題目原始截圖。nil 代表這題是存圖功能上線前貼的，沒圖可看
+	func image(for topicID: UUID) -> UIImage? {
+		UIImage(contentsOfFile: imageFileURL(topicID).path)
 	}
 
 	/// 貼上 / 分享進來的完整流程：概念清單 → 診斷 → 組題目 → 存檔，回傳新題 id。
 	/// 主 app 和分享浮層共用這一份，免得改流程時漏掉其中一邊。
 	func analyze(image: UIImage) async throws -> UUID {
+		// JPEG 只編碼一次，上傳和存檔共用同一份
+		guard let imageData = AIClient.jpeg(from: image) else { throw AIError.badImage }
 		let result = try await AIClient(apiKey: apiKey)
-			.diagnose(image: image, knownConcepts: recentConceptNames(limit: 50))
+			.diagnose(imageJPEG: imageData, knownConcepts: recentConceptNames(limit: 50))
 		let topic = Card(
 			title: result.title,
 			body: result.status,
@@ -129,6 +178,8 @@ final class CardStore: ObservableObject {
 			concepts: result.concepts
 		)
 		insert(topic)
+		// 原始截圖留檔 —— 病歷卡要能看到「題目長什麼樣」
+		try? imageData.write(to: imageFileURL(topic.id), options: .atomic)
 		return topic.id
 	}
 }

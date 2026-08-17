@@ -40,6 +40,45 @@ struct FlowLayout: Layout {
 	}
 }
 
+/// 樹的層級直線。樹頁的縮排線和病歷卡的內容邊線共用這一條，改視覺一處生效。
+struct TreeLine: View {
+	var body: some View {
+		Rectangle()
+			.fill(Color.secondary.opacity(0.25))
+			.frame(width: 1)
+			.padding(.leading, 9)
+			.padding(.trailing, 12)
+	}
+}
+
+/// 每種點的記號與顏色 —— 樹頁和病歷卡共用同一份對照，
+/// 一眼看得出這是「疑問」還是「有雷」還是「我自己加的」
+extension Card.Kind {
+	var mark: String {
+		switch self {
+		case .step: "▸"
+		case .question: "？"
+		case .supplement: "＋"
+		case .trap: "！"
+		case .extend: "↗"
+		case .custom: "✎"
+		case .topic: "◆"
+		}
+	}
+
+	var tint: Color {
+		switch self {
+		case .step: .blue
+		case .question: .accentColor
+		case .supplement: .teal
+		case .trap: .orange
+		case .extend: .purple
+		case .custom: .pink
+		case .topic: .accentColor
+		}
+	}
+}
+
 /// 一題的樹。主 app 和分享浮層用的是同一個畫面，差別只在外面包什麼。
 ///
 /// 視覺上要一眼看出是「樹」而不是「一串對話」，靠三件事：
@@ -138,7 +177,12 @@ struct CardTreeView: View {
 			if !topic.concepts.isEmpty {
 				FlowLayout(spacing: 5) {
 					ForEach(topic.concepts, id: \.self) { name in
-						chip(name, repeated: counts[name, default: 0] >= 2)
+						// 點概念進病歷卡 —— 值是概念名字串，
+						// 外層的 NavigationStack 要掛 conceptDestinations
+						NavigationLink(value: name) {
+							ConceptChip(name: name, repeated: store.isRepeated(name))
+						}
+						.buttonStyle(.plain)
 					}
 				}
 				.padding(.top, 4)
@@ -159,29 +203,13 @@ struct CardTreeView: View {
 		return repeated.joined(separator: "、")
 	}
 
-	private func chip(_ name: String, repeated: Bool) -> some View {
-		Text(name)
-			.font(.caption2)
-			.foregroundStyle(repeated ? Color.red : Color.secondary)
-			.padding(.horizontal, 8)
-			.padding(.vertical, 2)
-			.overlay(
-				Capsule().strokeBorder(
-					repeated ? Color.red.opacity(0.5) : Color.secondary.opacity(0.35))
-			)
-	}
-
 	// MARK: - 一個節點
 
 	private func node(_ card: Card, depth: Int) -> some View {
 		HStack(alignment: .top, spacing: 0) {
 			// 每一層一條垂直線，讓子節點看起來是掛在上一層底下的
 			ForEach(0..<depth, id: \.self) { _ in
-				Rectangle()
-					.fill(Color.secondary.opacity(0.25))
-					.frame(width: 1)
-					.padding(.leading, 9)
-					.padding(.trailing, 12)
+				TreeLine()
 			}
 
 			VStack(alignment: .leading, spacing: 6) {
@@ -263,38 +291,13 @@ struct CardTreeView: View {
 		if card.isExpanded {
 			Image(systemName: collapsed.contains(card.id) ? "chevron.right" : "chevron.down")
 				.font(.caption2.weight(.bold))
-				.foregroundStyle(Self.tint(card.kind))
+				.foregroundStyle(card.kind.tint)
 				.frame(width: 14)
 		} else {
-			Text(Self.mark(card.kind))
+			Text(card.kind.mark)
 				.font(.caption2.weight(.bold))
-				.foregroundStyle(Self.tint(card.kind))
+				.foregroundStyle(card.kind.tint)
 				.frame(width: 14)
-		}
-	}
-
-	/// 四種點各有記號，一眼看得出這是「疑問」還是「有雷」還是「我自己加的」
-	private static func mark(_ kind: Card.Kind) -> String {
-		switch kind {
-		case .step: "▸"
-		case .question: "？"
-		case .supplement: "＋"
-		case .trap: "！"
-		case .extend: "↗"
-		case .custom: "✎"
-		case .topic: "◆"
-		}
-	}
-
-	private static func tint(_ kind: Card.Kind) -> Color {
-		switch kind {
-		case .step: .blue
-		case .question: .accentColor
-		case .supplement: .teal
-		case .trap: .orange
-		case .extend: .purple
-		case .custom: .pink
-		case .topic: .accentColor
 		}
 	}
 
@@ -302,7 +305,10 @@ struct CardTreeView: View {
 
 	private func askOwn(_ topic: Card) -> some View {
 		HStack(spacing: 8) {
-			Text("✎").font(.caption2.weight(.bold)).foregroundStyle(.pink).frame(width: 14)
+			Text(Card.Kind.custom.mark)
+				.font(.caption2.weight(.bold))
+				.foregroundStyle(Card.Kind.custom.tint)
+				.frame(width: 14)
 			TextField("我想問別的…", text: $ownQuestion)
 				.font(.subheadline)
 				.submitLabel(.go)
