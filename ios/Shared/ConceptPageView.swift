@@ -1,13 +1,10 @@
 import SwiftUI
 
-/// 概念總覽頁的路由值。主 app 的導覽由 path 驅動，
-/// 所有跳頁都必須走 path —— 混用舊式 NavigationLink(destination:) 會讓
-/// 新頁被插到它下面，看起來像「點了沒反應，要按返回才會出現」。
-struct ConceptListRoute: Hashable {}
-
-/// 主 app 和分享浮層的 NavigationStack 都要認得這三種頁：
-/// UUID → 題目的樹、概念名（String）→ 病歷卡、ConceptListRoute → 概念總覽。
+/// 主 app 和分享浮層的 NavigationStack 都要認得這兩種頁：
+/// UUID → 題目的樹、概念名（String）→ 病歷卡。
 /// 收在一處，新增路由才不會漏掉浮層那邊。
+/// 注意：導覽全由 path 驅動 —— 混用舊式 NavigationLink(destination:) 會讓
+/// 新頁被插到它下面，看起來像「點了沒反應，要按返回才會出現」。
 extension View {
 	func conceptDestinations(store: CardStore) -> some View {
 		navigationDestination(for: UUID.self) { id in
@@ -18,16 +15,14 @@ extension View {
 		.navigationDestination(for: String.self) { name in
 			ConceptPageView(name: name, store: store)
 		}
-		.navigationDestination(for: ConceptListRoute.self) { _ in
-			ConceptListView(store: store)
-		}
 	}
 }
 
-/// 一個概念的病歷卡：卡了幾次、每次是哪題、當時的診斷、你當時問了什麼。
+/// 一個概念的病歷卡，以概念為主角：你對它問過什麼、它連到哪些概念、出現在哪些題。
 ///
-/// 整頁純 code、零 AI 呼叫 —— 這一頁的價值在「你卡的紀錄」，
-/// 這些事實 app 本來就存著，秒開、永遠準。概念的教學解釋留給之後的 wiki 連結。
+/// 一題掛多個概念時，完整紀錄若每個概念頁都放一份，逛起來像同一題被複製三次 ——
+/// 所以題目預設縮成一行索引，點了才原地展開當時的紀錄（截圖、診斷、追問）。
+/// 整頁純 code、零 AI 呼叫：這些事實 app 本來就存著，秒開、永遠準。
 struct ConceptPageView: View {
 	let name: String
 	@ObservedObject var store: CardStore
@@ -36,13 +31,16 @@ struct ConceptPageView: View {
 	@State private var images: [UUID: UIImage] = [:]
 	/// 點縮圖放大看的那一題
 	@State private var zoomTopic: Card?
+	/// 展開看紀錄的題目
+	@State private var expanded: Set<UUID> = []
 
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 20) {
 				header
-				recordsSection
+				questionsSection
 				relatedSection
+				recordsSection
 			}
 			.padding()
 		}
@@ -82,78 +80,26 @@ struct ConceptPageView: View {
 		}
 	}
 
-	private var recordsSection: some View {
-		VStack(alignment: .leading, spacing: 14) {
-			Text("卡的紀錄（新到舊）")
-				.font(.caption2)
-				.foregroundStyle(.tertiary)
-			ForEach(store.topics(withConcept: name)) { topic in
-				record(topic)
-			}
-		}
-	}
-
-	/// 一筆病歷：題目名點了跳回那棵樹，縮圖點了放大，其餘是當時的事實
-	private func record(_ topic: Card) -> some View {
-		VStack(alignment: .leading, spacing: 8) {
-			NavigationLink(value: topic.id) {
-				HStack(alignment: .firstTextBaseline, spacing: 8) {
-					Text(Card.Kind.topic.mark)
-						.font(.caption2.weight(.bold))
-						.foregroundStyle(Card.Kind.topic.tint)
-						.frame(width: 14)
-					Text(topic.title)
-						.font(.subheadline.weight(.semibold))
-						.foregroundStyle(.primary)
-						.multilineTextAlignment(.leading)
-					Spacer(minLength: 8)
-					Text(topic.createdAt.formatted(.dateTime.month().day()))
-						.font(.caption2)
-						.foregroundStyle(.tertiary)
-				}
-				.frame(maxWidth: .infinity, alignment: .leading)
-			}
-			.buttonStyle(.plain)
-
-			// 左邊一條線，跟樹頁同一套視覺 —— 底下的內容都掛在這筆題目下
-			HStack(alignment: .top, spacing: 0) {
-				TreeLine()
-
-				VStack(alignment: .leading, spacing: 8) {
-					if let image = images[topic.id] {
-						Button {
-							zoomTopic = topic
-						} label: {
-							// scaledToFit 整張圖完整可見 —— fill 會為了填滿寬度
-							// 把上下裁掉，題目截圖被裁就什麼都看不出來了
-							Image(uiImage: image)
-								.resizable()
-								.scaledToFit()
-								.frame(maxHeight: 180)
-								.clipShape(RoundedRectangle(cornerRadius: 8))
-						}
-						.buttonStyle(.plain)
-						.frame(maxWidth: .infinity, alignment: .leading)
-					}
-					if let body = topic.body {
-						MathText(text: "診斷：\(body)", font: .callout, size: 16)
+	/// 你在不同題裡對這個概念問過的問題，集結在最上面 ——
+	/// 這頁的主角是概念，你的疑問就是它在你腦中的樣子
+	@ViewBuilder
+	private var questionsSection: some View {
+		let questions = store.topics(withConcept: name)
+			.flatMap { topic in topic.children.filter { $0.kind == .custom } }
+		if !questions.isEmpty {
+			VStack(alignment: .leading, spacing: 8) {
+				Text("你在這個概念上問過的")
+					.font(.caption2)
+					.foregroundStyle(.tertiary)
+				ForEach(questions) { question in
+					HStack(alignment: .firstTextBaseline, spacing: 6) {
+						Text(Card.Kind.custom.mark)
+							.font(.caption2.weight(.bold))
+							.foregroundStyle(Card.Kind.custom.tint)
+						Text(question.title)
+							.font(.callout)
 							.foregroundStyle(.primary.opacity(0.85))
-					}
-					ForEach(topic.children.filter { $0.kind == .custom }) { question in
-						HStack(alignment: .firstTextBaseline, spacing: 6) {
-							Text(Card.Kind.custom.mark)
-								.font(.caption2.weight(.bold))
-								.foregroundStyle(Card.Kind.custom.tint)
-							Text("你問過：\(question.title)")
-								.font(.callout)
-								.foregroundStyle(.primary.opacity(0.85))
-								.fixedSize(horizontal: false, vertical: true)
-						}
-					}
-					if topic.expandedDescendants > 0 {
-						Text("點開過 \(topic.expandedDescendants) 個步驟")
-							.font(.caption)
-							.foregroundStyle(.secondary)
+							.fixedSize(horizontal: false, vertical: true)
 					}
 				}
 			}
@@ -165,7 +111,7 @@ struct ConceptPageView: View {
 		let related = store.relatedConcepts(to: name)
 		if !related.isEmpty {
 			VStack(alignment: .leading, spacing: 8) {
-				Text("相關概念（同一題一起出現過的）")
+				Text("延伸（同一題一起出現過的）")
 					.font(.caption2)
 					.foregroundStyle(.tertiary)
 				FlowLayout(spacing: 5) {
@@ -174,6 +120,98 @@ struct ConceptPageView: View {
 							ConceptChip(name: other, repeated: store.isRepeated(other))
 						}
 						.buttonStyle(.plain)
+					}
+				}
+			}
+		}
+	}
+
+	private var recordsSection: some View {
+		VStack(alignment: .leading, spacing: 14) {
+			Text("題目（點了展開當時的紀錄）")
+				.font(.caption2)
+				.foregroundStyle(.tertiary)
+			ForEach(store.topics(withConcept: name)) { topic in
+				record(topic)
+			}
+		}
+	}
+
+	/// 一行索引：紅字＝當時卡住。點了原地展開，展開裡才有跳回樹的入口
+	private func record(_ topic: Card) -> some View {
+		VStack(alignment: .leading, spacing: 8) {
+			Button {
+				if expanded.contains(topic.id) {
+					expanded.remove(topic.id)
+				} else {
+					expanded.insert(topic.id)
+				}
+			} label: {
+				HStack(alignment: .firstTextBaseline, spacing: 8) {
+					Image(systemName: expanded.contains(topic.id) ? "chevron.down" : "chevron.right")
+						.font(.caption2.weight(.semibold))
+						.foregroundStyle(.tertiary)
+						.frame(width: 14)
+					Text(topic.title)
+						.font(.subheadline.weight(.semibold))
+						.foregroundStyle(topic.situation == .stuck ? .red : .primary)
+						.multilineTextAlignment(.leading)
+					Spacer(minLength: 8)
+					Text(topic.createdAt.formatted(.dateTime.month().day()))
+						.font(.caption2)
+						.foregroundStyle(.tertiary)
+				}
+				.frame(maxWidth: .infinity, alignment: .leading)
+			}
+			.buttonStyle(.plain)
+
+			if expanded.contains(topic.id) {
+				// 左邊一條線，跟樹頁同一套視覺 —— 底下的內容都掛在這筆題目下
+				HStack(alignment: .top, spacing: 0) {
+					TreeLine()
+
+					VStack(alignment: .leading, spacing: 8) {
+						if let image = images[topic.id] {
+							Button {
+								zoomTopic = topic
+							} label: {
+								// scaledToFit 整張圖完整可見 —— fill 會為了填滿寬度
+								// 把上下裁掉，題目截圖被裁就什麼都看不出來了
+								Image(uiImage: image)
+									.resizable()
+									.scaledToFit()
+									.frame(maxHeight: 180)
+									.clipShape(RoundedRectangle(cornerRadius: 8))
+							}
+							.buttonStyle(.plain)
+							.frame(maxWidth: .infinity, alignment: .leading)
+						}
+						if let body = topic.body {
+							MathText(text: "診斷：\(body)", font: .callout, size: 16)
+								.foregroundStyle(.primary.opacity(0.85))
+						}
+						ForEach(topic.children.filter { $0.kind == .custom }) { question in
+							HStack(alignment: .firstTextBaseline, spacing: 6) {
+								Text(Card.Kind.custom.mark)
+									.font(.caption2.weight(.bold))
+									.foregroundStyle(Card.Kind.custom.tint)
+								Text("你問過：\(question.title)")
+									.font(.callout)
+									.foregroundStyle(.primary.opacity(0.85))
+									.fixedSize(horizontal: false, vertical: true)
+							}
+						}
+						if topic.expandedDescendants > 0 {
+							Text("點開過 \(topic.expandedDescendants) 個步驟")
+								.font(.caption)
+								.foregroundStyle(.secondary)
+						}
+						NavigationLink(value: topic.id) {
+							Label("打開這棵樹", systemImage: "arrow.turn.down.right")
+								.font(.caption.weight(.semibold))
+						}
+						.buttonStyle(.plain)
+						.foregroundStyle(.tint)
 					}
 				}
 			}
@@ -199,7 +237,9 @@ struct ConceptChip: View {
 	}
 }
 
-/// 全部概念的總覽：常卡的在最上面，點進去是病歷卡。
+/// 全部概念的總覽。上段「該回頭看的」：卡過的照最後一次卡的日期排，越近越前面，
+/// 每列帶「和誰一起出現」—— 概念是連在一起卡的，入口就要看得到連結。
+/// 下段其他概念照出現次數收在後面。
 struct ConceptListView: View {
 	@ObservedObject var store: CardStore
 
@@ -213,19 +253,33 @@ struct ConceptListView: View {
 					Text("貼幾題之後，用到的概念會累積在這裡。")
 				}
 			} else {
-				List(concepts, id: \.name) { item in
-					NavigationLink(value: item.name) {
-						HStack {
-							Text(item.name)
-							Spacer()
-							if store.isRepeated(stuckCount: item.stuck) {
-								Text("卡過 \(item.stuck) 次")
-									.font(.subheadline)
-									.foregroundStyle(.red)
-							} else {
-								Text("\(item.appearances) 題")
-									.font(.subheadline)
-									.foregroundStyle(.secondary)
+				let review = concepts
+					.filter { store.isRepeated(stuckCount: $0.stuck) }
+					.sorted {
+						(store.lastStuckDate($0.name) ?? .distantPast)
+							> (store.lastStuckDate($1.name) ?? .distantPast)
+					}
+				let rest = concepts.filter { !store.isRepeated(stuckCount: $0.stuck) }
+				List {
+					if !review.isEmpty {
+						Section("該回頭看的") {
+							ForEach(review, id: \.name) { item in
+								reviewRow(item)
+							}
+						}
+					}
+					if !rest.isEmpty {
+						Section(review.isEmpty ? "" : "其他") {
+							ForEach(rest, id: \.name) { item in
+								NavigationLink(value: item.name) {
+									HStack {
+										Text(item.name)
+										Spacer()
+										Text("\(item.appearances) 題")
+											.font(.subheadline)
+											.foregroundStyle(.secondary)
+									}
+								}
 							}
 						}
 					}
@@ -233,5 +287,34 @@ struct ConceptListView: View {
 			}
 		}
 		.navigationTitle("概念")
+	}
+
+	/// 該回頭看的一列：紅概念名＋一起出現的夥伴，右邊次數＋最後一次卡的日期
+	private func reviewRow(_ item: (name: String, appearances: Int, stuck: Int)) -> some View {
+		NavigationLink(value: item.name) {
+			HStack(alignment: .firstTextBaseline) {
+				VStack(alignment: .leading, spacing: 2) {
+					Text(item.name)
+						.foregroundStyle(.red)
+					let related = store.relatedConcepts(to: item.name).prefix(2)
+					if !related.isEmpty {
+						Text("和 \(related.joined(separator: "、")) 一起出現")
+							.font(.caption)
+							.foregroundStyle(.secondary)
+					}
+				}
+				Spacer()
+				VStack(alignment: .trailing, spacing: 2) {
+					Text("卡 \(item.stuck) 次")
+						.font(.subheadline)
+						.foregroundStyle(.red)
+					if let date = store.lastStuckDate(item.name) {
+						Text("最後一次 \(date.formatted(.dateTime.month().day()))")
+							.font(.caption2)
+							.foregroundStyle(.tertiary)
+					}
+				}
+			}
+		}
 	}
 }

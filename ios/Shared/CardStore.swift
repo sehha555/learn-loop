@@ -194,6 +194,12 @@ final class CardStore: ObservableObject {
 		isRepeated(stuckCount: stuckCount(name))
 	}
 
+	/// 最後一次卡這個概念是哪天 —— 總覽「該回頭看的」照這個排，越近越前面。
+	/// topics 新到舊，所以第一個命中的就是最近的
+	func lastStuckDate(_ name: String) -> Date? {
+		topics.first { $0.situation == .stuck && $0.concepts.contains(name) }?.createdAt
+	}
+
 	/// 跟這個概念在同一題出現過的其他概念，常一起出現的排前面（同分照筆畫穩定排）。
 	/// 只連使用者真的卡過的東西，不叫 AI 憑空列——這也是階段 3 graph 的邊
 	func relatedConcepts(to name: String) -> [String] {

@@ -19,12 +19,22 @@ struct LearnLoopApp: App {
 
 	var body: some Scene {
 		WindowGroup {
-			TopicListView(store: store)
-				// 從分享浮層回到主 app 時，樹可能已經被改過
-				.onReceive(
-					NotificationCenter.default.publisher(
-						for: UIApplication.willEnterForegroundNotification)
-				) { _ in store.load() }
+			// 題目和概念是兩個平等的視角，用 tab 一點就切 ——
+			// 藏在 toolbar 按鈕裡要推頁面進出，概念那頁就不會有人去看
+			TabView {
+				TopicListView(store: store)
+					.tabItem { Label("題目", systemImage: "list.bullet") }
+				NavigationStack {
+					ConceptListView(store: store)
+						.conceptDestinations(store: store)
+				}
+				.tabItem { Label("概念", systemImage: "tag") }
+			}
+			// 從分享浮層回到主 app 時，樹可能已經被改過
+			.onReceive(
+				NotificationCenter.default.publisher(
+					for: UIApplication.willEnterForegroundNotification)
+			) { _ in store.load() }
 		}
 	}
 }
@@ -55,11 +65,8 @@ struct TopicListView: View {
 					}
 				}
 			}
-			.navigationTitle("知識點")
+			.navigationTitle("題目")
 			.toolbar {
-				NavigationLink(value: ConceptListRoute()) {
-					Label("概念", systemImage: "tag")
-				}
 				Button("設定", systemImage: "gearshape") { showingSettings = true }
 			}
 			.sheet(isPresented: $showingSettings) {
