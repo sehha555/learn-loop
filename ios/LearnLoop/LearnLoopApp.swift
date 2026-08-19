@@ -57,9 +57,7 @@ struct TopicListView: View {
 			}
 			.navigationTitle("知識點")
 			.toolbar {
-				NavigationLink {
-					ConceptListView(store: store)
-				} label: {
+				NavigationLink(value: ConceptListRoute()) {
 					Label("概念", systemImage: "tag")
 				}
 				Button("設定", systemImage: "gearshape") { showingSettings = true }

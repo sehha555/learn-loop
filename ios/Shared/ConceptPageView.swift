@@ -1,7 +1,13 @@
 import SwiftUI
 
-/// 主 app 和分享浮層的 NavigationStack 都要認得這兩種頁：
-/// UUID → 題目的樹、概念名（String）→ 病歷卡。收在一處，新增路由才不會漏掉浮層那邊。
+/// 概念總覽頁的路由值。主 app 的導覽由 path 驅動，
+/// 所有跳頁都必須走 path —— 混用舊式 NavigationLink(destination:) 會讓
+/// 新頁被插到它下面，看起來像「點了沒反應，要按返回才會出現」。
+struct ConceptListRoute: Hashable {}
+
+/// 主 app 和分享浮層的 NavigationStack 都要認得這三種頁：
+/// UUID → 題目的樹、概念名（String）→ 病歷卡、ConceptListRoute → 概念總覽。
+/// 收在一處，新增路由才不會漏掉浮層那邊。
 extension View {
 	func conceptDestinations(store: CardStore) -> some View {
 		navigationDestination(for: UUID.self) { id in
@@ -11,6 +17,9 @@ extension View {
 		}
 		.navigationDestination(for: String.self) { name in
 			ConceptPageView(name: name, store: store)
+		}
+		.navigationDestination(for: ConceptListRoute.self) { _ in
+			ConceptListView(store: store)
 		}
 	}
 }
