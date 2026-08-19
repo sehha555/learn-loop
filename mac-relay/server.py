@@ -50,7 +50,8 @@ def call_claude(prompt: str, image_b64: str | None, schema: dict) -> dict:
         )
 
         out = subprocess.run(
-            ["claude", "-p", prompt, "--output-format", "json"],
+            # sonnet：診斷題目夠用、比預設模型快也省額度
+            ["claude", "-p", prompt, "--model", "sonnet", "--output-format", "json"],
             capture_output=True,
             text=True,
             timeout=CLAUDE_TIMEOUT,
