@@ -1,6 +1,6 @@
 # learn-loop
 
-一個 Obsidian 外掛。你在 Excalidraw 畫布上用 Apple Pencil 手寫算式，按一鍵，AI 讀你寫的東西，在旁邊長出解題節點。
+一個 iPad app。你在 GoodNotes 手寫作業，卡住時截圖貼給它，AI 像坐在旁邊的助教：診斷你卡在哪、不給答案，把該想的事變成一顆顆等你點開的節點。卡過的概念跨題目累積，長成你的弱點病歷。
 
 ## 要解的問題
 
@@ -14,7 +14,7 @@ AI 不准一次把話講完。它必須把「你可能不懂的點」變成畫�
 
 ```
         ┌─────────────────┐
-        │ 你手寫的那一題    │  ← 按一鍵
+        │ 你手寫的那一題    │  ← 截圖貼上
         └────────┬────────┘
                  │
         ┌────────▼────────┐
@@ -34,49 +34,44 @@ AI 不准一次把話講完。它必須把「你可能不懂的點」變成畫�
 
 ## 現在的狀態
 
-Spike 階段，在驗證技術假設。還沒有可用功能。
+原生 iPad app（`ios/`，SwiftUI），已經每天在用：
 
-### 三個關卡
+- **入口兩種**：主 app 的貼上鈕（Slide Over 疊在 GoodNotes 旁，截圖或圈選複製後貼）、系統分享浮層（Share Extension）
+- **診斷**：先分辨你是卡住、寫完還是還沒動筆，再決定講什麼；題目給客觀的解題步驟節點，點了才展開下一層
+- **概念累積**：每題抽 2-4 個概念名跨題計數，真的卡住的概念累積到第 2 次亮紅字「第 N 次卡了」
+- **概念病歷卡**：點概念名看你卡的紀錄——當時的截圖、診斷句、你自己問過的問題。整頁純 code，零 AI 呼叫
+- **模型**：貼 Gemini 或 Claude 的 API key 自動判斷走哪家；也可走 Mac 中繼站（`mac-relay/`），用本機 Claude Code 訂閱處理、連不到自動退回雲端
+- **手寫判讀**：已由日常使用驗證，視覺模型直接讀 GoodNotes 截圖夠準（早期旁證：13 題手寫作業 PDF 批改 0 誤判）
 
-| # | 假設 | 怎麼驗 | 狀態 |
-|---|---|---|---|
-| 1 | Excalidraw 的 Apple Pencil 手感能接受 | 在 iPad 上寫五行算式 | 待驗 |
-| 2 | 外掛能程式化拿到手寫內容的圖 | `learn-loop: 探測環境` 指令 | 待驗 |
-| 3 | 手寫算式的圖丟給模型，判讀夠準 | 拿關卡 2 的產出實測 | 待驗 |
-
-關卡 1 沒過，整條路要重想（換自製畫布或換輸入方式）。
-
-關卡 3 有旁證：2026-08-06 用同一個模型批改 13 題手寫作業（GoodNotes 匯出的 PDF），13 題只誤判 0 題。但那是 PDF 的解析度，畫布截圖的品質要另外確認。
+Obsidian 外掛是**擱置中的探索分支**，不是主線：`src/` 至今只有一個 `probe` 探測指令。留著是因為 layout / grouping 的演算法之後自製畫布用得上。
 
 ## 開發
 
 ```bash
-npm install
-npm run dev     # 監看編譯，輸出到 $LEARN_LOOP_OUT
+cd ios
+xcodegen generate    # 動過 project.yml 或增刪檔案後才需要
+xcodebuild -project LearnLoop.xcodeproj -scheme LearnLoop \
+  -destination 'generic/platform=iOS' -configuration Debug build -allowProvisioningUpdates
+xcrun devicectl device install app --device <裝置 id> <DerivedData 裡的 LearnLoop.app>
 ```
 
-`LEARN_LOOP_OUT` 預設是 `./dist`。開發時指到 vault 的外掛目錄：
+免費 Apple ID 簽章：7 天過期要重裝；拿不到 App Group，主 app 和分享浮層各存各的資料。裝完要把 app 從多工列滑掉重開才會是新版。
 
-```bash
-LEARN_LOOP_OUT="$HOME/Desktop/sehha555/.obsidian/plugins/learn-loop" npm run dev
-```
+擱置分支（Obsidian 外掛）的舊流程：`npm install && npm run dev`，輸出到 `$LEARN_LOOP_OUT`（預設 `./dist`），改完要在 Obsidian 重載外掛。
 
-改完 code 後要在 Obsidian 裡重載外掛（設定 → Community plugins → 關掉再打開）。
+## 為什麼是獨立 App，不是 Obsidian 外掛
 
-## 為什麼是 Obsidian 外掛，不是獨立 App
+原本的路是 Obsidian + Excalidraw：在畫布上手寫，外掛讀手寫內容丟給 AI。放棄的直接原因是技術風險：外掛要程式化拿到手寫圖，只能靠 Excalidraw 的 `ExcalidrawAutomate`，那是未公開 API，簽名靠猜、隨版本說變就變，整條產品押在它上面不可靠。
 
-排除過的方案與理由：
+當時排除過、現在仍然成立的判斷：
 
-- **仿 GoodNotes 做筆記 app** — 筆跡平滑、壓感、Pencil 低延遲、PDF 底稿、頁面管理，團隊等級的工作量，而且做出來會比 GoodNotes 難用。花三個月調筆觸跟學習流程無關
-- **導入 OCR** — 不需要。視覺模型直接讀手寫算式比 OCR 準，OCR 碰到積分符號、上下標、分數線就爛
-- **QuickTime 把 iPad 畫面鏡像到 Mac 後截圖** — 能動但要接線，而且是「從外面偷看」，AI 沒辦法回寫到同一張紙上
-- **通用剪貼簿（iPad 截圖 → 拷貝 → Mac 讀剪貼簿）** — 比鏡像簡單，但一樣是搬運，一樣回寫不了
-- **外部程式直接改 `.canvas` 檔** — 2026-08-06 實測，Obsidian Canvas 不支援外部檔案變更即時重繪，每改一次要手動關分頁重開。外掛從內部 API 改就沒這問題
+- **不仿 GoodNotes 做筆記 app**——筆跡平滑、壓感、Pencil 低延遲、PDF 底稿是團隊等級的工作量，花三個月調筆觸跟學習流程無關。所以獨立 app 選擇寄生 GoodNotes：手寫留在最好用的工具裡，learn-loop 只接截圖
+- **不導入 OCR**——視覺模型直接讀手寫算式比 OCR 準，OCR 碰到積分符號、上下標、分數線就爛
 
-留下 Obsidian 外掛的理由：寫字、AI 回應、筆記沉澱在同一個 app 同一台裝置，沒有跨越就沒有破碎。
+有一條當時的排除理由後來被推翻了，記在這裡：當初嫌截圖搬運「是從外面偷看，AI 沒辦法回寫到同一張紙上」。實際用下來，「回寫到紙上」這個要求本身被放掉了——AI 的輸出長在 app 自己的樹裡，比擠在畫布旁更好整理；同一台 iPad 上截圖貼上的摩擦，低到可以接受。
 
 ## 之後
 
-- 打字輸入（LaTeX）— 最終要，但手寫是目前的痛點，先做手寫
-- 方塊狀態（懂了變綠）讓整片畫布變成進度條
+- **概念的複習排程 / 主動回測**——現在只有你主動點進概念頁才看得到卡過幾次，系統從不主動把舊弱點端回你面前。累積層要成為 loop 而不是 log，這是已知的缺口
+- 方塊狀態（懂了變綠）讓整棵樹變成進度條
 - 一題做完自動收合成一則筆記

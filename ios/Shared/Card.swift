@@ -17,6 +17,13 @@ struct Card: Identifiable, Codable, Hashable {
 		case custom      // 你自己加的 —— AI 沒猜到的才是最有價值的資料
 	}
 
+	/// 這一題當下的狀態。診斷時模型判斷，存下來當「卡過幾次」的依據。
+	enum Situation: String, Codable {
+		case stuck   // 寫到一半停住
+		case done    // 寫完了
+		case blank   // 只有題目還沒動筆
+	}
+
 	let id: UUID
 	/// 標題。待展開的節點只有這個，內容要點了才生。
 	var title: String
@@ -28,6 +35,11 @@ struct Card: Identifiable, Codable, Hashable {
 	/// 這一題用到的概念名（AI 抽的，2-4 個）。只有 topic 層有，子節點都是空的。
 	/// 跨題目累積起來就是之後 wiki / graph 的地基。
 	var concepts: [String]
+	/// nil = 這題是本欄位上線前存的，狀態不明。
+	/// 刻意用 optional 而不是給預設值：把舊資料算進 stuck 會虛報，算進 done 會漏報，
+	/// 兩種都是在編造沒發生過的事實。不知道就是不知道。
+	/// 跟 concepts 同樣的約定：只有 topic 層有值，子節點一律 nil。
+	var situation: Situation?
 
 	init(
 		id: UUID = UUID(),
@@ -36,7 +48,8 @@ struct Card: Identifiable, Codable, Hashable {
 		kind: Kind = .question,
 		children: [Card] = [],
 		createdAt: Date = Date(),
-		concepts: [String] = []
+		concepts: [String] = [],
+		situation: Situation? = nil
 	) {
 		self.id = id
 		self.title = title
@@ -45,6 +58,7 @@ struct Card: Identifiable, Codable, Hashable {
 		self.children = children
 		self.createdAt = createdAt
 		self.concepts = concepts
+		self.situation = situation
 	}
 
 	/// 手寫的 init —— kind 是後來才加的欄位，舊存檔沒有它。
@@ -58,6 +72,7 @@ struct Card: Identifiable, Codable, Hashable {
 		children = try container.decodeIfPresent([Card].self, forKey: .children) ?? []
 		createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
 		concepts = try container.decodeIfPresent([String].self, forKey: .concepts) ?? []
+		situation = try container.decodeIfPresent(Situation.self, forKey: .situation)
 	}
 
 	var isExpanded: Bool { body != nil }

@@ -90,8 +90,13 @@ struct AIClient {
 	/// app 端用不到，所以不 decode 它。
 	struct Diagnosis: Decodable {
 		let title: String
-		/// stuck / done / blank —— 現在只用來除錯，UI 不顯示
+		/// stuck / done / blank —— 存檔後當「卡過幾次」的依據。
+		/// 維持 String 不用 enum：模型（尤其走中繼站那條字串解析的路）可能回超出
+		/// 範圍的值，直接 decode 成 enum 會讓整次診斷炸掉，為輔助欄位不划算。
 		let situation: String
+
+		/// 寬容政策收在 wire 邊界這裡：轉不出來就是 nil，呼叫端只拿 domain 值
+		var parsedSituation: Card.Situation? { Card.Situation(rawValue: situation) }
 		let status: String
 		/// 這題用到的概念名。跨題累積，之後長成 wiki / graph
 		let concepts: [String]
@@ -158,6 +163,8 @@ struct AIClient {
 	private static let formatRule = """
 	全部繁體中文。數學式用 LaTeX 寫，前後各包一個 $ 直接混在句子裡
 	（例如「先把 $\\sqrt{2}$ 移到左邊」「展開 $(x+3)^2$」），不要用 $$。
+	只用基本 LaTeX 指令（\\frac、\\sqrt、\\int、^、_ 這類），
+	不要用 \\dfrac、\\displaystyle 這些排版變體，渲染器不認得。
 	不是數學式的地方不要出現 $。不要用 markdown。
 	"""
 

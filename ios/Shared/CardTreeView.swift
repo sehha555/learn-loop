@@ -156,18 +156,14 @@ struct CardTreeView: View {
 
 	/// 層級刻意反過來：診斷那一句話才是主角（最大字），標題退成小字只做識別。
 	private func header(_ topic: Card) -> some View {
-		// 每個概念的次數算一次，紅字和 chips 共用同一份
-		let counts = topic.concepts.reduce(into: [String: Int]()) {
-			$0[$1] = store.conceptCount($1)
-		}
-		return VStack(alignment: .leading, spacing: 6) {
+		VStack(alignment: .leading, spacing: 6) {
 			Text(topic.title)
 				.font(.caption)
 				.foregroundStyle(.secondary)
 			if let body = topic.body {
 				MathText(text: body, font: .headline, size: 17)
 			}
-			if let recall = recallText(topic.concepts, counts: counts) {
+			if let recall = recallText(topic.concepts) {
 				Text(recall)
 					.font(.footnote.weight(.semibold))
 					.foregroundStyle(.red)
@@ -192,11 +188,12 @@ struct CardTreeView: View {
 		.background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
 	}
 
-	/// 「你之前也卡過」那行紅字。次數是 app 數出來的，模型只負責給概念名。
-	private func recallText(_ concepts: [String], counts: [String: Int]) -> String? {
+	/// 「你之前也卡過」那行紅字。數的是真的卡住的次數（app 算的，模型只給概念名），
+	/// 「算不算卡過」的門檻問 store，這裡不自己比大小。
+	private func recallText(_ concepts: [String]) -> String? {
 		let repeated = concepts.compactMap { name -> String? in
-			let count = counts[name, default: 0]
-			return count >= 2 ? "「\(name)」第 \(count) 次卡了" : nil
+			let count = store.stuckCount(name)
+			return store.isRepeated(stuckCount: count) ? "「\(name)」第 \(count) 次卡了" : nil
 		}
 		guard !repeated.isEmpty else { return nil }
 		return repeated.joined(separator: "、")

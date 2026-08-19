@@ -25,11 +25,14 @@ struct MathText: View {
 			case let .plain(raw):
 				return acc + Text(verbatim: raw)
 			case let .math(latex):
-				guard let image = Self.render(latex, size: size) else {
+				guard let rendered = Self.render(latex, size: size) else {
 					// 式子有語法錯畫不出來時，把原文還回去，不要整段吃掉
 					return acc + Text(verbatim: "$\(latex)$")
 				}
-				return acc + Text("\(Image(uiImage: image))")
+				// 圖片預設底邊貼基線，但分數、下標本來就該沉到基線以下 ——
+				// 用 descent 把它壓回去，數學式才會跟前後文字對齊
+				return acc + Text("\(Image(uiImage: rendered.image))")
+					.baselineOffset(-rendered.descent)
 			}
 		}
 	}
@@ -62,22 +65,40 @@ struct MathText: View {
 
 	// MARK: - 渲染
 
+	/// 圖片加上它該沉到基線以下多深。NSCache 只收 class，所以是 NSObject
+	private final class Rendered: NSObject {
+		let image: UIImage
+		let descent: CGFloat
+		init(image: UIImage, descent: CGFloat) {
+			self.image = image
+			self.descent = descent
+		}
+	}
+
 	/// 一頁有幾十個式子，body 每次重算都重排版會頓，所以照 latex + 字級快取
-	private static let cache = NSCache<NSString, UIImage>()
+	private static let cache = NSCache<NSString, Rendered>()
 
 	/// 畫成黑色再標成 template：實際顏色交給呼叫端的 foregroundStyle，
 	/// 深色模式才不用重畫一份
-	private static func render(_ latex: String, size: CGFloat) -> UIImage? {
+	private static func render(_ latex: String, size: CGFloat) -> Rendered? {
 		let key = "\(size)|\(latex)" as NSString
 		if let hit = cache.object(forKey: key) { return hit }
+		// SwiftMath 不認得 \dfrac 這類排版變體，會整式畫不出來 ——
+		// prompt 有叮嚀只用基本款，但模型還是會吐，這裡兜底降級
+		let normalized = latex
+			.replacingOccurrences(of: "\\dfrac", with: "\\frac")
+			.replacingOccurrences(of: "\\tfrac", with: "\\frac")
 		var math = MathImage(
-			latex: latex, fontSize: size, textColor: .black,
+			latex: normalized, fontSize: size, textColor: .black,
 			labelMode: .text, textAlignment: .left
 		)
-		let (error, image, _) = math.asImage()
+		let (error, image, layout) = math.asImage()
 		guard error == nil, let image else { return nil }
-		let template = image.withRenderingMode(.alwaysTemplate)
-		cache.setObject(template, forKey: key)
-		return template
+		let rendered = Rendered(
+			image: image.withRenderingMode(.alwaysTemplate),
+			descent: layout?.descent ?? 0
+		)
+		cache.setObject(rendered, forKey: key)
+		return rendered
 	}
 }

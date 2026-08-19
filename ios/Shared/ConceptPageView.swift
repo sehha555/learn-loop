@@ -65,16 +65,18 @@ struct ConceptPageView: View {
 
 	// MARK: - 各區塊
 
-	/// 概念名已經在導覽列上，這裡只放次數
+	/// 概念名已經在導覽列上，這裡只放次數。
+	/// 卡過時兩個數字都給 ——「卡 3 次但出現 5 題」跟「卡 3 次只出現 3 題」是不同的事
 	@ViewBuilder
 	private var header: some View {
-		let count = store.conceptCount(name)
-		if store.isRepeated(name) {
-			Text("卡過 \(count) 次")
+		let appearances = store.appearanceCount(name)
+		let stuck = store.stuckCount(name)
+		if store.isRepeated(stuckCount: stuck) {
+			Text("卡過 \(stuck) 次 · 出現在 \(appearances) 題裡")
 				.font(.footnote.weight(.semibold))
 				.foregroundStyle(.red)
 		} else {
-			Text("出現在 \(count) 題裡")
+			Text("出現在 \(appearances) 題裡")
 				.font(.footnote)
 				.foregroundStyle(.secondary)
 		}
@@ -122,14 +124,16 @@ struct ConceptPageView: View {
 						Button {
 							zoomTopic = topic
 						} label: {
+							// scaledToFit 整張圖完整可見 —— fill 會為了填滿寬度
+							// 把上下裁掉，題目截圖被裁就什麼都看不出來了
 							Image(uiImage: image)
 								.resizable()
-								.scaledToFill()
-								.frame(maxWidth: .infinity)
-								.frame(height: 90)
+								.scaledToFit()
+								.frame(maxHeight: 180)
 								.clipShape(RoundedRectangle(cornerRadius: 8))
 						}
 						.buttonStyle(.plain)
+						.frame(maxWidth: .infinity, alignment: .leading)
 					}
 					if let body = topic.body {
 						MathText(text: "診斷：\(body)", font: .callout, size: 16)
@@ -214,11 +218,15 @@ struct ConceptListView: View {
 						HStack {
 							Text(item.name)
 							Spacer()
-							Text("\(item.count) 題")
-								.font(.subheadline)
-								.foregroundStyle(
-									store.isRepeated(item.name)
-										? Color.red : Color.secondary)
+							if store.isRepeated(stuckCount: item.stuck) {
+								Text("卡過 \(item.stuck) 次")
+									.font(.subheadline)
+									.foregroundStyle(.red)
+							} else {
+								Text("\(item.appearances) 題")
+									.font(.subheadline)
+									.foregroundStyle(.secondary)
+							}
 						}
 					}
 				}
