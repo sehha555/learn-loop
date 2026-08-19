@@ -88,7 +88,8 @@ struct CardTreeView: View {
 	let topicID: UUID
 	@ObservedObject var store: CardStore
 
-	@State private var loading: Set<UUID> = []
+	/// 進行中的展開請求。存 Task 而不是單純的 id，是為了讓使用者再點一下就取消
+	@State private var running: [UUID: Task<Void, Never>] = [:]
 	@State private var collapsed: Set<UUID> = []
 	@State private var ownQuestion = ""
 	@State private var errorText: String?
@@ -164,9 +165,7 @@ struct CardTreeView: View {
 				.font(.caption)
 				.foregroundStyle(.secondary)
 			if let body = topic.body {
-				Text(body)
-					.font(.headline)
-					.fixedSize(horizontal: false, vertical: true)
+				MathText(text: body, font: .headline, size: 17)
 			}
 			if let recall = recallText(topic.concepts, counts: counts) {
 				Text(recall)
@@ -240,10 +239,8 @@ struct CardTreeView: View {
 						.foregroundStyle(.secondary)
 						.frame(width: 16, height: 16)
 						.background(Color(.tertiarySystemFill), in: Circle())
-					Text(line)
-						.font(.callout)
+					MathText(text: line, font: .callout, size: 16)
 						.foregroundStyle(.primary.opacity(0.85))
-						.fixedSize(horizontal: false, vertical: true)
 				}
 			}
 		}
@@ -251,23 +248,29 @@ struct CardTreeView: View {
 
 	private func title(_ card: Card) -> some View {
 		Button {
-			if card.isExpanded {
+			if let task = running[card.id] {
+				// 轉圈圈時再點一次就是反悔。留著 running 讓 expand 的 defer 自己清，
+				// 這裡先清掉的話下一次點會跟還沒結束的舊 Task 搶同一格
+				task.cancel()
+			} else if card.isExpanded {
 				// 展開過的：點一下收起來，再點打開
 				if collapsed.contains(card.id) { collapsed.remove(card.id) }
 				else { collapsed.insert(card.id) }
 			} else {
-				Task { await expand(card) }
+				start(expanding: card)
 			}
 		} label: {
 			HStack(alignment: .firstTextBaseline, spacing: 8) {
 				marker(card)
-				Text(card.title)
-					.font(.subheadline.weight(card.isExpanded ? .semibold : .regular))
-					.foregroundStyle(card.isExpanded ? .primary : .secondary)
-					.multilineTextAlignment(.leading)
-					.fixedSize(horizontal: false, vertical: true)
+				MathText(
+					text: card.title,
+					font: .subheadline.weight(card.isExpanded ? .semibold : .regular),
+					size: 15
+				)
+				.foregroundStyle(card.isExpanded ? .primary : .secondary)
+				.multilineTextAlignment(.leading)
 				Spacer(minLength: 0)
-				if loading.contains(card.id) {
+				if running[card.id] != nil {
 					ProgressView().controlSize(.small)
 				}
 			}
@@ -283,7 +286,6 @@ struct CardTreeView: View {
 			)
 		}
 		.buttonStyle(.plain)
-		.disabled(loading.contains(card.id))
 	}
 
 	@ViewBuilder
@@ -312,9 +314,9 @@ struct CardTreeView: View {
 			TextField("我想問別的…", text: $ownQuestion)
 				.font(.subheadline)
 				.submitLabel(.go)
-				.onSubmit { Task { await askOwn(in: topic.id) } }
+				.onSubmit { askOwn(in: topic.id) }
 			if !ownQuestion.trimmingCharacters(in: .whitespaces).isEmpty {
-				Button("問") { Task { await askOwn(in: topic.id) } }
+				Button("問") { askOwn(in: topic.id) }
 					.font(.subheadline.weight(.semibold))
 					.buttonStyle(.borderless)
 			}
@@ -324,7 +326,7 @@ struct CardTreeView: View {
 		.background(Color.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 	}
 
-	private func askOwn(in topicID: UUID) async {
+	private func askOwn(in topicID: UUID) {
 		let text = ownQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard !text.isEmpty, let id = store.addCustom(topicID: topicID, title: text) else {
 			return
@@ -333,15 +335,21 @@ struct CardTreeView: View {
 		guard let card = store.topics.first(where: { $0.id == topicID })?
 			.children.first(where: { $0.id == id })
 		else { return }
-		await expand(card)
+		start(expanding: card)
 	}
 
 	// MARK: - 展開
 
+	private func start(expanding card: Card) {
+		running[card.id] = Task { await expand(card) }
+	}
+
+	/// 標 MainActor 是為了讓 Task 的第一步一定是切回主執行緒 ——
+	/// 這個 suspension 保證 start 那行把 Task 存進 running 之後，defer 才有機會清掉它
+	@MainActor
 	private func expand(_ card: Card) async {
 		guard let topic, let (_, path) = store.context(for: card.id) else { return }
-		loading.insert(card.id)
-		defer { loading.remove(card.id) }
+		defer { running[card.id] = nil }
 		do {
 			let result = try await store.ai.expand(
 				topic: topic.title,
@@ -351,6 +359,11 @@ struct CardTreeView: View {
 			)
 			store.expand(cardID: card.id, body: result.body, followUps: result.followUps)
 		} catch {
+			// 使用者自己按掉的不是出錯，不要跳 alert。
+			// URLSession 被中斷時丟的是 URLError.cancelled，不是 CancellationError
+			guard !Task.isCancelled, !(error is CancellationError),
+				(error as? URLError)?.code != .cancelled
+			else { return }
 			errorText = error.localizedDescription
 		}
 	}

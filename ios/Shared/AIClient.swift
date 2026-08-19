@@ -156,8 +156,9 @@ struct AIClient {
 
 	/// 輸出格式是全 client 的不變量，diagnose / expand 共用一份，改一處兩邊生效
 	private static let formatRule = """
-	全部繁體中文。數學符號用純文字寫（x²、√2、(x+3)²），
-	絕對不要用 LaTeX、不要用 $ 符號、不要用 markdown。
+	全部繁體中文。數學式用 LaTeX 寫，前後各包一個 $ 直接混在句子裡
+	（例如「先把 $\\sqrt{2}$ 移到左邊」「展開 $(x+3)^2$」），不要用 $$。
+	不是數學式的地方不要出現 $。不要用 markdown。
 	"""
 
 	/// diagnose 和 expand 的 point 結構相同，只差合法的 kind 清單
@@ -291,6 +292,8 @@ struct AIClient {
 				return try await callRelay(
 					relay, text: text, imageBase64: imageBase64, schema: schema)
 			} catch {
+				// 使用者自己按掉的話不要換路再打一次
+				try Task.checkCancellation()
 				// Mac 睡著或連不上：有 key 就靜默退回雲端，讀書不中斷
 				if apiKey.isEmpty { throw error }
 			}

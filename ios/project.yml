@@ -17,6 +17,12 @@ settings:
     DEVELOPMENT_TEAM: SBQBLH3786
     TARGETED_DEVICE_FAMILY: "2" # 只做 iPad
 
+packages:
+  # 離線渲染 LaTeX 數學式。Shared/ 兩個 target 共用，所以兩邊都要連
+  SwiftMath:
+    url: https://github.com/mgriebling/SwiftMath
+    from: "1.7.3"
+
 targets:
   LearnLoop:
     type: application
@@ -46,6 +52,7 @@ targets:
     dependencies:
       - target: ShareExtension
         embed: true
+      - package: SwiftMath
 
   ShareExtension:
     type: app-extension
@@ -66,3 +73,5 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sehha555.learnloop.share
+    dependencies:
+      - package: SwiftMath

@@ -132,10 +132,8 @@ struct ConceptPageView: View {
 						.buttonStyle(.plain)
 					}
 					if let body = topic.body {
-						Text("診斷：\(body)")
-							.font(.callout)
+						MathText(text: "診斷：\(body)", font: .callout, size: 16)
 							.foregroundStyle(.primary.opacity(0.85))
-							.fixedSize(horizontal: false, vertical: true)
 					}
 					ForEach(topic.children.filter { $0.kind == .custom }) { question in
 						HStack(alignment: .firstTextBaseline, spacing: 6) {
