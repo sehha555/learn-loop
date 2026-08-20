@@ -125,7 +125,9 @@ struct TopicListView: View {
 		VStack(alignment: .leading, spacing: 4) {
 			Text(topic.title).font(.headline)
 			if let body = topic.body {
-				Text(body).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+				MathText(text: body, font: .caption, size: 12)
+					.foregroundStyle(.secondary)
+					.lineLimit(2)
 			}
 			if topic.pendingCount > 0 {
 				Text("\(topic.pendingCount) 個沒展開")
