@@ -27,6 +27,8 @@ struct LearnLoopApp: App {
 				AskTabView(store: store)
 					.tabItem { Label("概念", systemImage: "tag") }
 			}
+			// 舊題補抄題目原文，背景跑、跑完清單自己更新
+			.task { if store.hasProvider { await store.backfillProblems() } }
 			// 從分享浮層回到主 app 時，樹可能已經被改過
 			.onReceive(
 				NotificationCenter.default.publisher(

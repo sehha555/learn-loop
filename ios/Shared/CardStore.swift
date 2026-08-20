@@ -299,6 +299,24 @@ final class CardStore: ObservableObject {
 		UIImage(contentsOfFile: imageFileURL(topicID).path)
 	}
 
+	/// 「題目原文」欄上線前拍的舊題，拿存著的截圖補抄一次。一次只跑一題（不要同時開
+	/// 好幾個 claude），失敗就跳過、下次啟動再試；沒圖的舊題沒得補，維持名字當大標
+	private var backfilling = false
+	func backfillProblems() async {
+		guard !backfilling else { return }
+		backfilling = true
+		defer { backfilling = false }
+		for topic in problems where topic.problem == nil {
+			guard let data = try? Data(contentsOf: imageFileURL(topic.id)) else { continue }
+			guard let text = try? await ai.extractProblem(imageJPEG: data),
+				!text.isEmpty,
+				let index = topics.firstIndex(where: { $0.id == topic.id })
+			else { continue }
+			topics[index].problem = text
+			save()
+		}
+	}
+
 	/// 直接問（沒貼題目）：問題自成一棵樹，歸到模型判的概念下，回傳新樹 id
 	func ask(question: String) async throws -> UUID {
 		let result = try await ai
