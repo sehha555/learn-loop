@@ -33,16 +33,25 @@ struct ConceptPageView: View {
 	@State private var zoomTopic: Card?
 	/// 展開看紀錄的題目
 	@State private var expanded: Set<UUID> = []
+	@State private var noteQuestion = ""
+	@State private var asking = false
+	@State private var errorText: String?
 
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 20) {
 				header
+				notesSection
 				questionsSection
 				relatedSection
 				recordsSection
 			}
 			.padding()
+		}
+		.alert("出錯了", isPresented: .constant(errorText != nil)) {
+			Button("好") { errorText = nil }
+		} message: {
+			Text(errorText ?? "")
 		}
 		.navigationTitle(name)
 		.navigationBarTitleDisplayMode(.inline)
@@ -77,6 +86,104 @@ struct ConceptPageView: View {
 			Text("出現在 \(appearances) 題裡")
 				.font(.footnote)
 				.foregroundStyle(.secondary)
+		}
+	}
+
+	/// 知識點：不針對題目、直接問這個概念的問答。這裡問的記在這裡；
+	/// 題目頁裡「不只關那題」的問題也能搬過來。追問走同一套樹頁
+	@ViewBuilder
+	private var notesSection: some View {
+		let note = store.noteTopic(for: name)
+		VStack(alignment: .leading, spacing: 10) {
+			Text("知識點（不針對題目的問答）")
+				.font(.caption2)
+				.foregroundStyle(.tertiary)
+			if let note {
+				ForEach(note.children) { question in
+					VStack(alignment: .leading, spacing: 6) {
+						HStack(alignment: .firstTextBaseline, spacing: 6) {
+							Text(Card.Kind.custom.mark)
+								.font(.caption2.weight(.bold))
+								.foregroundStyle(Card.Kind.custom.tint)
+							MathText(text: question.title, font: .subheadline.weight(.semibold), size: 15)
+						}
+						if let body = question.body {
+							ForEach(
+								Array(body.split(separator: "\n").enumerated()), id: \.offset
+							) { _, line in
+								MathText(text: String(line), font: .callout, size: 15)
+									.foregroundStyle(.primary.opacity(0.85))
+							}
+							.padding(.leading, 16)
+						}
+						if !question.children.isEmpty {
+							Text("底下還有 \(question.children.count) 個追問")
+								.font(.caption2)
+								.foregroundStyle(.tertiary)
+								.padding(.leading, 16)
+						}
+					}
+					.padding(10)
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+				}
+				NavigationLink(value: note.id) {
+					Label("打開知識點樹（可以接著追問）", systemImage: "arrow.turn.down.right")
+						.font(.caption.weight(.semibold))
+				}
+				.buttonStyle(.plain)
+				.foregroundStyle(.tint)
+			}
+			HStack(spacing: 8) {
+				Text(Card.Kind.custom.mark)
+					.font(.caption2.weight(.bold))
+					.foregroundStyle(Card.Kind.custom.tint)
+					.frame(width: 14)
+				TextField("問這個概念…", text: $noteQuestion)
+					.font(.subheadline)
+					.submitLabel(.go)
+					.onSubmit { askNote() }
+					.disabled(asking)
+				if asking {
+					ProgressView().controlSize(.small)
+				} else if !noteQuestion.trimmingCharacters(in: .whitespaces).isEmpty {
+					Button("問") { askNote() }
+						.font(.subheadline.weight(.semibold))
+						.buttonStyle(.borderless)
+				}
+			}
+			.padding(.vertical, 7)
+			.padding(.horizontal, 10)
+			.background(Color.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+		}
+	}
+
+	/// 在概念頁問：掛到這個概念的知識點樹根部，原地等答案。
+	/// 追問的追問去樹頁做（那裡有接點、取消這些機制）
+	private func askNote() {
+		let text = noteQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !text.isEmpty, !asking else { return }
+		let noteID = store.ensureNoteTopic(for: name)
+		guard let id = store.addCustom(topicID: noteID, parentID: nil, title: text) else { return }
+		noteQuestion = ""
+		asking = true
+		Task { @MainActor in
+			defer { asking = false }
+			do {
+				let note = store.topics.first { $0.id == noteID }
+				let result = try await store.ai.expand(
+					topic: "概念「\(name)」的知識問題，不針對特定題目",
+					diagnosis: "",
+					transcript: nil,
+					explained: note?.explainedLines() ?? [],
+					path: [text],
+					style: store.teachingStyle,
+					wantFollowUps: false
+				)
+				store.expand(cardID: id, body: result.body, followUps: result.followUps)
+			} catch {
+				errorText = error.localizedDescription
+			}
 		}
 	}
 
@@ -223,17 +330,21 @@ struct ConceptPageView: View {
 struct ConceptChip: View {
 	let name: String
 	let repeated: Bool
+	/// 主概念（題目歸在哪一段）—— 清單上藍色，讓人看得出分段依據
+	var primary: Bool = false
+
+	private var color: Color {
+		repeated ? .red : (primary ? .accentColor : .secondary)
+	}
 
 	var body: some View {
 		Text(name)
 			.font(.caption2)
-			.foregroundStyle(repeated ? Color.red : Color.secondary)
+			.foregroundStyle(color)
 			.padding(.horizontal, 8)
 			.padding(.vertical, 2)
-			.overlay(
-				Capsule().strokeBorder(
-					repeated ? Color.red.opacity(0.5) : Color.secondary.opacity(0.35))
-			)
+			.background(primary ? color.opacity(0.08) : .clear, in: Capsule())
+			.overlay(Capsule().strokeBorder(color.opacity(primary ? 0.6 : 0.4)))
 	}
 }
 

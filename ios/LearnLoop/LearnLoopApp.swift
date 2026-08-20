@@ -46,6 +46,8 @@ struct TopicListView: View {
 	@State private var analyzing = false
 	@State private var path = NavigationPath()
 	@State private var errorMessage: String?
+	/// 收合寫在 UserDefaults，SwiftUI 不會察覺 —— 這個數字變了才重繪
+	@State private var groupsVersion = 0
 
 	var body: some View {
 		NavigationStack(path: $path) {
@@ -54,13 +56,21 @@ struct TopicListView: View {
 					empty
 				} else {
 					List {
-						ForEach(store.topics) { topic in
-							NavigationLink(value: topic.id) {
-								row(topic)
+						ForEach(groups, id: \.name) { group in
+							Section {
+								if !collapsedGroups.contains(group.name) {
+									ForEach(group.topics) { topic in
+										NavigationLink(value: topic.id) {
+											row(topic)
+										}
+									}
+									.onDelete { indexes in
+										for i in indexes { store.delete(topicID: group.topics[i].id) }
+									}
+								}
+							} header: {
+								groupHeader(group)
 							}
-						}
-						.onDelete { indexes in
-							for i in indexes { store.delete(topicID: store.topics[i].id) }
 						}
 					}
 				}
@@ -105,6 +115,46 @@ struct TopicListView: View {
 		.background(.bar)
 	}
 
+	/// 照「主概念」（模型列的第一個）分段，一題只出現一次；段落順序＝最新那題的順序。
+	/// 其他概念靠列上的 tag 看到
+	private var groups: [(name: String, topics: [Card])] {
+		var order: [String] = []
+		var byName: [String: [Card]] = [:]
+		for topic in store.problems {
+			let name = topic.concepts.first ?? "未分類"
+			if byName[name] == nil { order.append(name) }
+			byName[name, default: []].append(topic)
+		}
+		return order.map { ($0, byName[$0]!) }
+	}
+
+	/// 段落收合也要記得，跟樹頁的節點一樣
+	private var collapsedGroups: Set<String> {
+		get { Set(UserDefaults.standard.stringArray(forKey: "collapsedTopicGroups") ?? []) }
+		nonmutating set {
+			UserDefaults.standard.set(Array(newValue), forKey: "collapsedTopicGroups")
+			groupsVersion += 1
+		}
+	}
+
+	private func groupHeader(_ group: (name: String, topics: [Card])) -> some View {
+		Button {
+			var set = collapsedGroups
+			if set.contains(group.name) { set.remove(group.name) } else { set.insert(group.name) }
+			collapsedGroups = set
+		} label: {
+			HStack {
+				Text(group.name)
+				Spacer()
+				Text("\(group.topics.count) 題")
+				Image(systemName: collapsedGroups.contains(group.name) ? "chevron.right" : "chevron.down")
+					.font(.caption2.weight(.semibold))
+			}
+			.contentShape(Rectangle())
+		}
+		.buttonStyle(.plain)
+	}
+
 	@MainActor
 	private func analyze(_ image: UIImage) async {
 		guard store.hasProvider else {
@@ -121,13 +171,21 @@ struct TopicListView: View {
 		}
 	}
 
+	/// 預覽放題目原文（舊題沒抄就退回診斷句），底下一排概念 tag，主概念藍色
 	private func row(_ topic: Card) -> some View {
-		VStack(alignment: .leading, spacing: 4) {
+		VStack(alignment: .leading, spacing: 5) {
 			Text(topic.title).font(.headline)
-			if let body = topic.body {
-				MathText(text: body, font: .caption, size: 12)
+			if let preview = topic.problem ?? topic.body {
+				MathText(text: preview, font: .caption, size: 12)
 					.foregroundStyle(.secondary)
-					.lineLimit(2)
+					.lineLimit(3)
+			}
+			if !topic.concepts.isEmpty {
+				FlowLayout(spacing: 5) {
+					ForEach(Array(topic.concepts.enumerated()), id: \.offset) { index, name in
+						ConceptChip(name: name, repeated: store.isRepeated(name), primary: index == 0)
+					}
+				}
 			}
 			if topic.pendingCount > 0 {
 				Text("\(topic.pendingCount) 個沒展開")
