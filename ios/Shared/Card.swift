@@ -48,6 +48,9 @@ struct Card: Identifiable, Codable, Hashable {
 	var problem: String?
 	/// 使用者把這個節點收起來了。存檔而不是放在畫面狀態裡 —— 離開再回來要記得
 	var collapsed: Bool
+	/// 這個問答不只關這一題、屬於某個概念的知識 —— 模型答題時順便判斷，判錯可手動改。
+	/// 節點留在原樹不搬，概念的知識點頁同時列出它
+	var noteConcept: String?
 
 	init(
 		id: UUID = UUID(),
@@ -60,7 +63,8 @@ struct Card: Identifiable, Codable, Hashable {
 		situation: Situation? = nil,
 		transcript: String? = nil,
 		problem: String? = nil,
-		collapsed: Bool = false
+		collapsed: Bool = false,
+		noteConcept: String? = nil
 	) {
 		self.id = id
 		self.title = title
@@ -73,6 +77,7 @@ struct Card: Identifiable, Codable, Hashable {
 		self.transcript = transcript
 		self.problem = problem
 		self.collapsed = collapsed
+		self.noteConcept = noteConcept
 	}
 
 	/// 手寫的 init —— kind 是後來才加的欄位，舊存檔沒有它。
@@ -90,6 +95,7 @@ struct Card: Identifiable, Codable, Hashable {
 		transcript = try container.decodeIfPresent(String.self, forKey: .transcript)
 		problem = try container.decodeIfPresent(String.self, forKey: .problem)
 		collapsed = try container.decodeIfPresent(Bool.self, forKey: .collapsed) ?? false
+		noteConcept = try container.decodeIfPresent(String.self, forKey: .noteConcept)
 	}
 
 	var isExpanded: Bool { body != nil }
@@ -144,15 +150,9 @@ extension Card {
 		return nil
 	}
 
-	/// 把指定節點整棵摘下來，回傳摘下的那棵；找不到回傳 nil
-	mutating func remove(id target: UUID) -> Card? {
-		if let index = children.firstIndex(where: { $0.id == target }) {
-			return children.remove(at: index)
-		}
-		for index in children.indices {
-			if let hit = children[index].remove(id: target) { return hit }
-		}
-		return nil
+	/// 子樹裡被標成某概念知識的節點（含自己）
+	func cards(taggedWith concept: String) -> [Card] {
+		(noteConcept == concept ? [self] : []) + children.flatMap { $0.cards(taggedWith: concept) }
 	}
 
 	/// 從根到指定節點的標題路徑 —— 追問時要把這條路徑餵給模型當脈絡

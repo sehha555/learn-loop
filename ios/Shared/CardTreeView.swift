@@ -299,19 +299,29 @@ struct CardTreeView: View {
 		.padding(.vertical, 3)
 	}
 
-	/// 這個問題其實不關這一題、關概念 —— 搬到概念的知識點下，題目頁就不會越長越長。
-	/// 你按才搬，不讓模型猜
+	/// 模型答題時順便判斷這問答是不是概念層的知識；這裡顯示判斷結果，判錯可以改。
+	/// 節點不搬，只是概念的知識點頁會同時列出它
 	private func moveToNoteMenu(_ card: Card, concepts: [String]) -> some View {
 		Menu {
 			ForEach(concepts, id: \.self) { name in
-				Button("存到「\(name)」知識點") {
-					if attachID == card.id { attachID = nil }
-					store.moveToNote(cardID: card.id, concept: name)
+				Button("收進「\(name)」知識點") {
+					store.setNoteConcept(cardID: card.id, concept: name)
+				}
+			}
+			if card.noteConcept != nil {
+				Button("這只關這題，移出知識點", role: .destructive) {
+					store.setNoteConcept(cardID: card.id, concept: nil)
 				}
 			}
 		} label: {
-			Label("這不只關這題，存到知識點", systemImage: "arrow.turn.down.right")
-				.font(.caption)
+			if let concept = card.noteConcept {
+				Label("已收進「\(concept)」知識點", systemImage: "book.closed")
+					.font(.caption)
+			} else {
+				Label("只關這題 · 改收進知識點", systemImage: "book.closed")
+					.font(.caption)
+					.foregroundStyle(.tertiary)
+			}
 		}
 	}
 
@@ -528,9 +538,13 @@ struct CardTreeView: View {
 				explained: topic.explainedLines(),
 				path: Array(path.dropFirst()), // 第一個是題目本身，模型已經知道
 				style: store.teachingStyle,
-				wantFollowUps: card.kind != .custom
+				wantFollowUps: card.kind != .custom,
+				// 自己打的問題才判斷屬不屬於概念知識；知識點樹裡問的本來就是
+				conceptChoices: (card.kind == .custom && topic.kind != .note) ? topic.concepts : []
 			)
-			store.expand(cardID: card.id, body: result.body, followUps: result.followUps)
+			store.expand(
+				cardID: card.id, body: result.body, followUps: result.followUps,
+				noteConcept: result.concept)
 			// 剛講完的東西就是下一個問題最可能接的地方
 			attachID = card.id
 		} catch {

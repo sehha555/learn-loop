@@ -93,11 +93,15 @@ final class CardStore: ObservableObject {
 		save()
 	}
 
-	/// 展開某個節點：填上內容，並把模型延伸出來的新問題掛成子節點
-	func expand(cardID: UUID, body: String, followUps: [AIClient.Point]) {
+	/// 展開某個節點：填上內容，並把模型延伸出來的新問題掛成子節點；
+	/// noteConcept 是模型判斷「這問答屬於哪個概念的知識」，nil = 就是這題的事
+	func expand(
+		cardID: UUID, body: String, followUps: [AIClient.Point], noteConcept: String? = nil
+	) {
 		for index in topics.indices {
 			let hit = topics[index].update(id: cardID) { card in
 				card.body = body
+				card.noteConcept = noteConcept
 				card.children.append(
 					contentsOf: followUps.map { Card(title: $0.title, kind: $0.kind) })
 			}
@@ -147,17 +151,17 @@ final class CardStore: ObservableObject {
 		return note.id
 	}
 
-	/// 把題目樹裡的一個問題（整條線）搬到概念的知識點下 —— 它跟這題無關、跟概念有關
-	func moveToNote(cardID: UUID, concept: String) {
-		var moved: Card?
+	/// 手動改模型的判斷：標成某概念的知識（nil = 取消）
+	func setNoteConcept(cardID: UUID, concept: String?) {
 		for index in topics.indices {
-			if let card = topics[index].remove(id: cardID) { moved = card; break }
+			if topics[index].update(id: cardID, { $0.noteConcept = concept }) { break }
 		}
-		guard let moved else { return }
-		let noteID = ensureNoteTopic(for: concept)
-		guard let index = topics.firstIndex(where: { $0.id == noteID }) else { return }
-		topics[index].children.append(moved)
 		save()
+	}
+
+	/// 題目樹裡被標成這個概念知識的問答，附上來源題目 —— 知識點頁連同概念頁自己問的一起列
+	func taggedNotes(for concept: String) -> [(card: Card, topic: Card)] {
+		problems.flatMap { topic in topic.cards(taggedWith: concept).map { ($0, topic) } }
 	}
 
 	/// 使用者改過的抄錄。模型抄錯根號、上下標時，改這裡一次，之後追問全用對的版本

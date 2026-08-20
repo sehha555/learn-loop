@@ -94,39 +94,21 @@ struct ConceptPageView: View {
 	@ViewBuilder
 	private var notesSection: some View {
 		let note = store.noteTopic(for: name)
+		let tagged = store.taggedNotes(for: name)
 		VStack(alignment: .leading, spacing: 10) {
-			Text("知識點（不針對題目的問答）")
+			Text("知識點（不只關某一題的問答）")
 				.font(.caption2)
 				.foregroundStyle(.tertiary)
 			if let note {
 				ForEach(note.children) { question in
-					VStack(alignment: .leading, spacing: 6) {
-						HStack(alignment: .firstTextBaseline, spacing: 6) {
-							Text(Card.Kind.custom.mark)
-								.font(.caption2.weight(.bold))
-								.foregroundStyle(Card.Kind.custom.tint)
-							MathText(text: question.title, font: .subheadline.weight(.semibold), size: 15)
-						}
-						if let body = question.body {
-							ForEach(
-								Array(body.split(separator: "\n").enumerated()), id: \.offset
-							) { _, line in
-								MathText(text: String(line), font: .callout, size: 15)
-									.foregroundStyle(.primary.opacity(0.85))
-							}
-							.padding(.leading, 16)
-						}
-						if !question.children.isEmpty {
-							Text("底下還有 \(question.children.count) 個追問")
-								.font(.caption2)
-								.foregroundStyle(.tertiary)
-								.padding(.leading, 16)
-						}
-					}
-					.padding(10)
-					.frame(maxWidth: .infinity, alignment: .leading)
-					.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+					noteCard(question, source: nil)
 				}
+			}
+			// 題目頁裡問的、模型判斷屬於這個概念的 —— 點來源可以跳回那棵樹
+			ForEach(tagged, id: \.card.id) { item in
+				noteCard(item.card, source: item.topic)
+			}
+			if let note {
 				NavigationLink(value: note.id) {
 					Label("打開知識點樹（可以接著追問）", systemImage: "arrow.turn.down.right")
 						.font(.caption.weight(.semibold))
@@ -156,6 +138,42 @@ struct ConceptPageView: View {
 			.padding(.horizontal, 10)
 			.background(Color.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 		}
+	}
+
+	private func noteCard(_ question: Card, source: Card?) -> some View {
+		VStack(alignment: .leading, spacing: 6) {
+			HStack(alignment: .firstTextBaseline, spacing: 6) {
+				Text(Card.Kind.custom.mark)
+					.font(.caption2.weight(.bold))
+					.foregroundStyle(Card.Kind.custom.tint)
+				MathText(text: question.title, font: .subheadline.weight(.semibold), size: 15)
+			}
+			if let body = question.body {
+				ForEach(Array(body.split(separator: "\n").enumerated()), id: \.offset) { _, line in
+					MathText(text: String(line), font: .callout, size: 15)
+						.foregroundStyle(.primary.opacity(0.85))
+				}
+				.padding(.leading, 16)
+			}
+			if !question.children.isEmpty {
+				Text("底下還有 \(question.children.count) 個追問")
+					.font(.caption2)
+					.foregroundStyle(.tertiary)
+					.padding(.leading, 16)
+			}
+			if let source {
+				NavigationLink(value: source.id) {
+					Text("來自題目：\(source.title)")
+						.font(.caption2)
+						.foregroundStyle(.tint)
+				}
+				.buttonStyle(.plain)
+				.padding(.leading, 16)
+			}
+		}
+		.padding(10)
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
 	}
 
 	/// 在概念頁問：掛到這個概念的知識點樹根部，原地等答案。

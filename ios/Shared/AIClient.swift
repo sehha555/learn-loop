@@ -272,24 +272,32 @@ struct AIClient {
 	struct Expansion: Decodable {
 		let body: String
 		let followUps: [Point]
+		/// 自己打的問題才有：這問題屬於哪個概念的知識（不只關這題），nil = 就是這題的事
+		let concept: String?
 
 		enum CodingKeys: String, CodingKey {
 			case body
 			case followUps = "follow_ups"
+			case concept
 		}
 	}
 
-	private static let expandSchema: [String: Any] = [
-		"type": "object",
-		"properties": [
+	/// conceptChoices 非空時多要一個 concept 欄位：模型判斷這個問答是不是概念層的
+	private static func expandSchema(conceptChoices: [String]) -> [String: Any] {
+		var properties: [String: Any] = [
 			"body": ["type": "string"],
 			"follow_ups": [
 				"type": "array",
 				"items": pointSchema(kinds: ["question", "supplement", "trap", "extend"]),
 			],
-		],
-		"required": ["body", "follow_ups"],
-	]
+		]
+		var required = ["body", "follow_ups"]
+		if !conceptChoices.isEmpty {
+			properties["concept"] = ["type": "string", "enum": conceptChoices + ["（這題專屬）"]]
+			required.append("concept")
+		}
+		return ["type": "object", "properties": properties, "required": required]
+	}
 
 	/// - Parameters:
 	///   - transcript: 診斷時抄下的圖片內容。nil = 這題是本欄位上線前存的，只能靠標題
@@ -297,10 +305,21 @@ struct AIClient {
 	///   - path: 從題目到這個點的標題路徑，讓模型知道在回答哪一層
 	///   - style: 使用者選的教學口吻
 	///   - wantFollowUps: 自己打的問題不要再長出「你可能想問」的點 —— 他要的是答案
+	///   - conceptChoices: 這題的概念名。給了就要模型順便判斷這問答屬不屬於某個概念的知識
 	func expand(
 		topic: String, diagnosis: String, transcript: String?, explained: [String],
-		path: [String], style: TeachingStyle, wantFollowUps: Bool
+		path: [String], style: TeachingStyle, wantFollowUps: Bool,
+		conceptChoices: [String] = []
 	) async throws -> Expansion {
+		let conceptRule =
+			conceptChoices.isEmpty
+			? ""
+			: """
+
+			6. concept：判斷他這個問題是「只有這題才會問」（代這個數字、這一行哪裡錯），
+			   還是「換一題也會問、屬於概念本身」（什麼時候用、為什麼這樣設、公式怎麼來）。
+			   前者給「（這題專屬）」；後者從清單裡挑最貼的概念名原樣回。
+			"""
 		let followUpRule =
 			wantFollowUps
 			? """
@@ -335,14 +354,17 @@ struct AIClient {
 		3. \(followUpRule)
 		4. 不要重複已經講過的東西；他問的如果指涉前面某一段（「第二步為什麼」「那個公式」），
 		   就對著那一段回答。
-		5. \(Self.formatRule)
+		5. \(Self.formatRule)\(conceptRule)
 		"""
-		return try await call(
+		let result: Expansion = try await call(
 			text: prompt,
 			imageBase64: nil,
 			toolName: "record_expansion",
-			schema: Self.expandSchema
+			schema: Self.expandSchema(conceptChoices: conceptChoices)
 		)
+		// 哨兵值與清單外的名字一律當「這題專屬」
+		let concept = result.concept.flatMap { conceptChoices.contains($0) ? $0 : nil }
+		return Expansion(body: result.body, followUps: result.followUps, concept: concept)
 	}
 
 	// MARK: - 送出
