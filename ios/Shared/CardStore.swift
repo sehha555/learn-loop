@@ -281,13 +281,27 @@ final class CardStore: ObservableObject {
 	}
 
 	/// 全部概念：真的卡住的排最上面，其次常出現的（同分照筆畫穩定排）—— 總覽頁用
-	func allConcepts() -> [(name: String, appearances: Int, stuck: Int)] {
+	/// 這個概念底下的知識點數：概念頁問的＋題目裡標到它的＋直接問的
+	func noteCount(for concept: String) -> Int {
+		(noteTopic(for: concept)?.children.count ?? 0)
+			+ taggedNotes(for: concept).count
+			+ freeQuestions(for: concept).count
+	}
+
+	/// 概念總覽的資料。只靠直接問累積、還沒出現在任何題目裡的概念也要列出來
+	func allConcepts() -> [(name: String, appearances: Int, stuck: Int, notes: Int)] {
 		let stats = conceptStats()
-		return stats.appearances
-			.map { (name: $0.key, appearances: $0.value, stuck: stats.stuck[$0.key] ?? 0) }
+		var names = Set(stats.appearances.keys)
+		for tree in topics where tree.kind == .free { names.formUnion(tree.concepts) }
+		return names
+			.map {
+				(name: $0, appearances: stats.appearances[$0] ?? 0,
+				 stuck: stats.stuck[$0] ?? 0, notes: noteCount(for: $0))
+			}
 			.sorted {
 				if $0.stuck != $1.stuck { return $0.stuck > $1.stuck }
 				if $0.appearances != $1.appearances { return $0.appearances > $1.appearances }
+				if $0.notes != $1.notes { return $0.notes > $1.notes }
 				return $0.name < $1.name
 			}
 	}
@@ -298,9 +312,14 @@ final class CardStore: ObservableObject {
 		imagesDir.appendingPathComponent("\(topicID.uuidString).jpg")
 	}
 
-	/// 題目原始截圖。nil 代表這題是存圖功能上線前貼的，沒圖可看
+	/// 題目原始截圖。nil 代表這題是存圖功能上線前貼的，沒圖可看。
+	/// 知識點問題附的圖也用同一套，key 是那張卡的 id
 	func image(for topicID: UUID) -> UIImage? {
 		UIImage(contentsOfFile: imageFileURL(topicID).path)
+	}
+
+	func saveImage(_ data: Data, for cardID: UUID) {
+		try? data.write(to: imageFileURL(cardID), options: .atomic)
 	}
 
 	/// 「題目原文」欄上線前拍的舊題，拿存著的截圖補抄一次。一次只跑一題（不要同時開
@@ -331,19 +350,28 @@ final class CardStore: ObservableObject {
 		save()
 	}
 
-	/// 直接問（沒貼題目）：問題自成一棵樹，歸到模型判的概念下，回傳新樹 id
-	func ask(question: String) async throws -> UUID {
-		let result = try await ai
-			.ask(question: question, knownConcepts: conceptNamesForPrompt(limit: 50))
+	/// 直接問（沒貼題目）：問題自成一棵樹，歸到模型判的概念下，回傳新樹 id。
+	/// 可以帶一張圖（課本的圖、筆記的一段）；圖會抄成文字存進樹，之後追問才有脈絡
+	func ask(question: String, image: UIImage? = nil) async throws -> UUID {
+		var imageData: Data?
+		if let image {
+			guard let data = AIClient.jpeg(from: image) else { throw AIError.badImage }
+			imageData = data
+		}
+		let result = try await ai.ask(
+			question: question, imageJPEG: imageData,
+			knownConcepts: conceptNamesForPrompt(limit: 50))
 		let tree = Card(
 			title: result.title,
 			body: result.status,
 			kind: .free,
 			children: result.points.map { Card(title: $0.title, kind: $0.kind) },
 			concepts: result.concepts,
-			problem: question
+			transcript: result.transcript,
+			problem: question.isEmpty ? result.title : question
 		)
 		insert(tree)
+		if let imageData { saveImage(imageData, for: tree.id) }
 		return tree.id
 	}
 

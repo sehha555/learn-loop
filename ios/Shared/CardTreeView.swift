@@ -418,6 +418,10 @@ struct CardTreeView: View {
 				.multilineTextAlignment(.leading)
 				Spacer(minLength: 0)
 				if running[card.id] != nil {
+					// 再點一下就是取消 —— 寫出來，不然沒人知道可以按
+					Text("取消")
+						.font(.caption)
+						.foregroundStyle(.secondary)
 					ProgressView().controlSize(.small)
 				} else if card.isExpanded {
 					// 換接點：下一個問題接在這個節點下，岔出另一條線
@@ -562,11 +566,7 @@ struct CardTreeView: View {
 			// 剛講完的東西就是下一個問題最可能接的地方
 			attachID = card.id
 		} catch {
-			// 使用者自己按掉的不是出錯，不要跳 alert。
-			// URLSession 被中斷時丟的是 URLError.cancelled，不是 CancellationError
-			guard !Task.isCancelled, !(error is CancellationError),
-				(error as? URLError)?.code != .cancelled
-			else { return }
+			guard !AIClient.isCancellation(error) else { return }
 			errorText = error.localizedDescription
 		}
 	}

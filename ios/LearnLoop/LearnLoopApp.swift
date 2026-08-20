@@ -1,17 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
-
-/// 剪貼簿貼進來的圖。PasteButton 要求 Transferable，UIImage 沒有，包一層。
-struct PastedImage: Transferable {
-	let image: UIImage
-
-	static var transferRepresentation: some TransferRepresentation {
-		DataRepresentation(importedContentType: .image) { data in
-			guard let image = UIImage(data: data) else { throw AIError.badImage }
-			return PastedImage(image: image)
-		}
-	}
-}
 
 @main
 struct LearnLoopApp: App {
@@ -44,7 +31,10 @@ struct AskTabView: View {
 	@ObservedObject var store: CardStore
 	@State private var path = NavigationPath()
 	@State private var question = ""
-	@State private var asking = false
+	/// 貼進來的圖（課本的圖、筆記的一段），跟問題一起給模型
+	@State private var image: UIImage?
+	/// 進行中的請求。存 Task 是為了讓「取消」真的能中斷
+	@State private var asking: Task<Void, Never>?
 	@State private var errorMessage: String?
 
 	var body: some View {
@@ -60,20 +50,52 @@ struct AskTabView: View {
 		}
 	}
 
+	private var canAsk: Bool {
+		!question.trimmingCharacters(in: .whitespaces).isEmpty || image != nil
+	}
+
 	private var askBar: some View {
-		HStack(spacing: 8) {
-			if asking {
-				ProgressView()
-				Text("想一下…").foregroundStyle(.secondary)
-			} else {
-				TextField("直接問（不用貼題目）…", text: $question)
+		VStack(spacing: 8) {
+			if let image, asking == nil {
+				HStack(spacing: 8) {
+					Image(uiImage: image)
+						.resizable()
+						.scaledToFit()
+						.frame(height: 56)
+						.clipShape(RoundedRectangle(cornerRadius: 6))
+					Button("移除圖片", systemImage: "xmark.circle.fill") { self.image = nil }
+						.labelStyle(.iconOnly)
+						.foregroundStyle(.secondary)
+					Spacer()
+				}
+			}
+			HStack(spacing: 8) {
+				if asking != nil {
+					ProgressView()
+					Text("想一下…").foregroundStyle(.secondary)
+					Spacer()
+					Button("取消") { asking?.cancel() }
+						.buttonStyle(.bordered)
+						.buttonBorderShape(.capsule)
+				} else {
+					// 跟題目頁一樣用系統 PasteButton，不會每次跳「允許貼上？」
+					PasteButton(payloadType: PastedImage.self) { pasted in
+						if let first = pasted.first { image = first.image }
+					}
+					.labelStyle(.iconOnly)
+					.buttonBorderShape(.capsule)
+					TextField(
+						image == nil ? "直接問（不用貼題目）…" : "這張圖想問什麼？（可留空）",
+						text: $question
+					)
 					.textFieldStyle(.roundedBorder)
 					.submitLabel(.go)
 					.onSubmit { ask() }
-				if !question.trimmingCharacters(in: .whitespaces).isEmpty {
-					Button("問") { ask() }
-						.buttonStyle(.borderedProminent)
-						.buttonBorderShape(.capsule)
+					if canAsk {
+						Button("問") { ask() }
+							.buttonStyle(.borderedProminent)
+							.buttonBorderShape(.capsule)
+					}
 				}
 			}
 		}
@@ -86,15 +108,16 @@ struct AskTabView: View {
 	@MainActor
 	private func ask() {
 		let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !text.isEmpty, !asking, store.hasProvider else { return }
-		asking = true
-		Task { @MainActor in
-			defer { asking = false }
+		guard canAsk, asking == nil, store.hasProvider else { return }
+		asking = Task { @MainActor in
+			defer { asking = nil }
 			do {
 				// 答完直接跳進那棵樹
-				path.append(try await store.ask(question: text))
+				path.append(try await store.ask(question: text, image: image))
 				question = ""
+				image = nil
 			} catch {
+				guard !AIClient.isCancellation(error) else { return }
 				errorMessage = error.localizedDescription
 			}
 		}
@@ -108,8 +131,9 @@ struct TopicListView: View {
 	@State private var analyzing = false
 	@State private var path = NavigationPath()
 	@State private var errorMessage: String?
-	/// 收合寫在 UserDefaults，SwiftUI 不會察覺 —— 這個數字變了才重繪
-	@State private var groupsVersion = 0
+	/// 段落收合。改 @State 畫面才會重畫；UserDefaults 只負責記住
+	@State private var collapsedGroups = Set(
+		UserDefaults.standard.stringArray(forKey: "collapsedTopicGroups") ?? [])
 
 	var body: some View {
 		NavigationStack(path: $path) {
@@ -195,20 +219,15 @@ struct TopicListView: View {
 		return order.map { ($0, byName[$0]!) }
 	}
 
-	/// 段落收合也要記得，跟樹頁的節點一樣
-	private var collapsedGroups: Set<String> {
-		get { Set(UserDefaults.standard.stringArray(forKey: "collapsedTopicGroups") ?? []) }
-		nonmutating set {
-			UserDefaults.standard.set(Array(newValue), forKey: "collapsedTopicGroups")
-			groupsVersion += 1
-		}
-	}
-
 	private func groupHeader(_ group: (name: String, topics: [Card])) -> some View {
 		Button {
-			var set = collapsedGroups
-			if set.contains(group.name) { set.remove(group.name) } else { set.insert(group.name) }
-			collapsedGroups = set
+			if collapsedGroups.contains(group.name) {
+				collapsedGroups.remove(group.name)
+			} else {
+				collapsedGroups.insert(group.name)
+			}
+			// 跟樹頁的節點一樣，收合要記得
+			UserDefaults.standard.set(Array(collapsedGroups), forKey: "collapsedTopicGroups")
 		} label: {
 			HStack {
 				Text(group.name)
