@@ -116,6 +116,14 @@ struct Card: Identifiable, Codable, Hashable {
 }
 
 extension Card {
+	/// 剝掉題目開頭的題號（「1.」「(3)」「第 2 題」「Q1」「例 3」），模型忘了也擋得住。
+	/// 清單大標只要題目本體
+	static func stripProblemNumber(_ text: String) -> String {
+		let pattern = #"^\s*(?:第\s*[0-9一二三四五六七八九十]+\s*題|[例題]\s*[0-9]+|[Qq]\s*[0-9]+|[(（]\s*[0-9a-zA-Z]+\s*[)）]|[0-9]+\s*[.、)）]|[a-zA-Z]\s*[.)）])[\s.、:：]*"#
+		let stripped = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+		return stripped.isEmpty ? text : stripped
+	}
+
 	/// 在樹裡找到指定節點並就地改寫。找不到回傳 false。
 	@discardableResult
 	mutating func update(id target: UUID, _ transform: (inout Card) -> Void) -> Bool {

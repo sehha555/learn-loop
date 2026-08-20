@@ -26,9 +26,9 @@ PORT = 8787
 CLAUDE_TIMEOUT = 180
 
 
-# 反斜線後面接兩個以上英文字母 —— 這是 LaTeX 指令（\\frac、\\int、\\neq），
-# 不是 JSON 跳脫；模型常常忘了把它寫成 \\\\frac
-LATEX_COMMAND = re.compile(r"\\(?=[A-Za-z]{2,})")
+# 沒跳脫的 LaTeX 反斜線：後面接兩個以上英文字母的是指令（\\frac、\\int、\\neq ——
+# 就算開頭撞到 JSON 的 \\f \\n \\t 也一樣），後面接非 JSON 跳脫字元的是符號（\\, \\{ \\ ）
+LATEX_BACKSLASH = re.compile(r'\\(?=[A-Za-z]{2,})|\\(?![\"\\/bfnrtu])')
 
 
 def extract_json(text: str) -> dict:
@@ -45,7 +45,7 @@ def extract_json(text: str) -> dict:
     try:
         return json.loads(raw, strict=False)
     except json.JSONDecodeError:
-        return json.loads(LATEX_COMMAND.sub(r"\\\\", raw), strict=False)
+        return json.loads(LATEX_BACKSLASH.sub(r"\\\\", raw), strict=False)
 
 
 def call_claude(prompt: str, image_b64: str | None, schema: dict) -> dict:

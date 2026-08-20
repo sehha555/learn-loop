@@ -84,7 +84,11 @@ final class CardStore: ObservableObject {
 		guard let data = try? Data(contentsOf: fileURL),
 		      let decoded = try? JSONDecoder().decode([Card].self, from: data)
 		else { return }
-		topics = decoded
+		topics = decoded.map { topic in
+			var topic = topic
+			if let problem = topic.problem { topic.problem = Card.stripProblemNumber(problem) }
+			return topic
+		}
 	}
 
 	private func save() {
@@ -312,7 +316,7 @@ final class CardStore: ObservableObject {
 				!text.isEmpty,
 				let index = topics.firstIndex(where: { $0.id == topic.id })
 			else { continue }
-			topics[index].problem = text
+			topics[index].problem = Card.stripProblemNumber(text)
 			save()
 		}
 	}
@@ -348,7 +352,7 @@ final class CardStore: ObservableObject {
 			concepts: result.concepts,
 			situation: result.parsedSituation,
 			transcript: result.transcript,
-			problem: result.problem.isEmpty ? nil : result.problem
+			problem: result.problem.isEmpty ? nil : Card.stripProblemNumber(result.problem)
 		)
 		insert(topic)
 		// 原始截圖留檔 —— 病歷卡要能看到「題目長什麼樣」
