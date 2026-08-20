@@ -14,6 +14,7 @@ prompt 和輸出格式（JSON Schema）都由 app 端決定，這裡只轉手不
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -25,12 +26,26 @@ PORT = 8787
 CLAUDE_TIMEOUT = 180
 
 
+# 反斜線後面接兩個以上英文字母 —— 這是 LaTeX 指令（\\frac、\\int、\\neq），
+# 不是 JSON 跳脫；模型常常忘了把它寫成 \\\\frac
+LATEX_COMMAND = re.compile(r"\\(?=[A-Za-z]{2,})")
+
+
 def extract_json(text: str) -> dict:
-    """模型偶爾會在 JSON 外面包 markdown 圍欄或多講一句，掐頭去尾只留物件"""
+    """模型偶爾會在 JSON 外面包 markdown 圍欄或多講一句，掐頭去尾只留物件。
+
+    字串裡的 LaTeX 反斜線模型也常忘了跳脫（\\int 在 JSON 裡是非法的 \\i），
+    先照原樣解，失敗再把 LaTeX 指令的反斜線補成雙反斜線重解一次。
+    strict=False 是讓字串裡直接出現的換行也過關。
+    """
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
         raise ValueError(f"回應裡沒有 JSON：{text[:200]}")
-    return json.loads(text[start : end + 1])
+    raw = text[start : end + 1]
+    try:
+        return json.loads(raw, strict=False)
+    except json.JSONDecodeError:
+        return json.loads(LATEX_COMMAND.sub(r"\\\\", raw), strict=False)
 
 
 def call_claude(prompt: str, image_b64: str | None, schema: dict) -> dict:
