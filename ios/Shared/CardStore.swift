@@ -113,6 +113,13 @@ final class CardStore: ObservableObject {
 		return card.id
 	}
 
+	/// 使用者改過的抄錄。模型抄錯根號、上下標時，改這裡一次，之後追問全用對的版本
+	func updateTranscript(topicID: UUID, text: String) {
+		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return }
+		topics[index].transcript = text
+		save()
+	}
+
 	/// 找出某個節點所在的題目與路徑，追問時當脈絡送給模型
 	func context(for cardID: UUID) -> (topic: Card, path: [String])? {
 		for topic in topics {

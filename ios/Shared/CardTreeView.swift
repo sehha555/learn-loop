@@ -93,6 +93,8 @@ struct CardTreeView: View {
 	@State private var collapsed: Set<UUID> = []
 	@State private var ownQuestion = ""
 	@State private var errorText: String?
+	@State private var showingTranscript = false
+	@State private var transcriptDraft = ""
 
 	private var topic: Card? { store.topics.first { $0.id == topicID } }
 
@@ -163,6 +165,9 @@ struct CardTreeView: View {
 			if let body = topic.body {
 				MathText(text: body, font: .headline, size: 17)
 			}
+			if let transcript = topic.transcript {
+				transcriptBlock(transcript, topicID: topic.id)
+			}
 			if let recall = recallText(topic.concepts) {
 				Text(recall)
 					.font(.footnote.weight(.semibold))
@@ -186,6 +191,50 @@ struct CardTreeView: View {
 		.frame(maxWidth: .infinity, alignment: .leading)
 		.padding(14)
 		.background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+	}
+
+	/// 模型抄下來的圖片內容。預設收著（頁面已經夠長），展開看它抄對沒、錯了就改 ——
+	/// 追問全靠這份，抄錯會一路錯
+	private func transcriptBlock(_ transcript: String, topicID: UUID) -> some View {
+		DisclosureGroup {
+			VStack(alignment: .leading, spacing: 4) {
+				ForEach(Array(transcript.split(separator: "\n").enumerated()), id: \.offset) {
+					_, line in
+					MathText(text: String(line), font: .callout, size: 15)
+				}
+				Button("抄錯了，我改") {
+					transcriptDraft = transcript
+					showingTranscript = true
+				}
+				.font(.caption)
+				.padding(.top, 4)
+			}
+			.padding(.top, 6)
+		} label: {
+			Text("圖片抄錄（追問時模型看的是這份）")
+				.font(.caption)
+				.foregroundStyle(.secondary)
+		}
+		.sheet(isPresented: $showingTranscript) {
+			NavigationStack {
+				TextEditor(text: $transcriptDraft)
+					.font(.system(.body, design: .monospaced))
+					.padding()
+					.navigationTitle("改抄錄")
+					.navigationBarTitleDisplayMode(.inline)
+					.toolbar {
+						ToolbarItem(placement: .cancellationAction) {
+							Button("取消") { showingTranscript = false }
+						}
+						ToolbarItem(placement: .confirmationAction) {
+							Button("存") {
+								store.updateTranscript(topicID: topicID, text: transcriptDraft)
+								showingTranscript = false
+							}
+						}
+					}
+			}
+		}
 	}
 
 	/// 「你之前也卡過」那行紅字。數的是真的卡住的次數（app 算的，模型只給概念名），
