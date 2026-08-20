@@ -321,6 +321,16 @@ final class CardStore: ObservableObject {
 		}
 	}
 
+	/// 抄得不乾淨的那題，重新抄一次
+	func reextractProblem(topicID: UUID) async {
+		guard let data = try? Data(contentsOf: imageFileURL(topicID)),
+			let text = try? await ai.extractProblem(imageJPEG: data), !text.isEmpty,
+			let index = topics.firstIndex(where: { $0.id == topicID })
+		else { return }
+		topics[index].problem = Card.stripProblemNumber(text)
+		save()
+	}
+
 	/// 直接問（沒貼題目）：問題自成一棵樹，歸到模型判的概念下，回傳新樹 id
 	func ask(question: String) async throws -> UUID {
 		let result = try await ai

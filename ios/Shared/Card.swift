@@ -120,7 +120,13 @@ extension Card {
 	/// 清單大標只要題目本體
 	static func stripProblemNumber(_ text: String) -> String {
 		let pattern = #"^\s*(?:第\s*[0-9一二三四五六七八九十]+\s*題|[例題]\s*[0-9]+|[Qq]\s*[0-9]+|[(（]\s*[0-9a-zA-Z]+\s*[)）]|[0-9]+\s*[.、)）]|[a-zA-Z]\s*[.)）])[\s.、:：]*"#
-		let stripped = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+		var stripped = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+		// 結尾的等號是他準備開始算的記號，不是題目的一部分（「$\int … dx =$」「… = ?」）
+		stripped = stripped.replacingOccurrences(
+			of: #"[\s=＝?？]+(\$?)\s*$"#, with: "$1", options: .regularExpression)
+		stripped = stripped.replacingOccurrences(
+			of: #"[\s=＝?？]+\$\s*$"#, with: "$", options: .regularExpression)
+		stripped = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
 		return stripped.isEmpty ? text : stripped
 	}
 

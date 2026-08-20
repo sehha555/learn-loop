@@ -125,6 +125,11 @@ struct TopicListView: View {
 										NavigationLink(value: topic.id) {
 											row(topic)
 										}
+										.contextMenu {
+											Button("重新抄題目", systemImage: "arrow.clockwise") {
+												Task { await store.reextractProblem(topicID: topic.id) }
+											}
+										}
 									}
 									.onDelete { indexes in
 										for i in indexes { store.delete(topicID: group.topics[i].id) }
