@@ -64,6 +64,7 @@ extension Card.Kind {
 		case .custom: "✎"
 		case .topic: "◆"
 		case .note: "◇"
+		case .free: "◇"
 		}
 	}
 
@@ -77,6 +78,7 @@ extension Card.Kind {
 		case .custom: .pink
 		case .topic: .accentColor
 		case .note: .accentColor
+		case .free: .accentColor
 		}
 	}
 }
@@ -178,6 +180,11 @@ struct CardTreeView: View {
 			}
 			if let transcript = topic.transcript {
 				transcriptBlock(transcript, topicID: topic.id)
+			}
+			if topic.kind == .free, let question = topic.problem {
+				Text("你問：\(question)")
+					.font(.caption)
+					.foregroundStyle(.secondary)
 			}
 			if let recall = recallText(topic.concepts) {
 				Text(recall)
@@ -522,6 +529,15 @@ struct CardTreeView: View {
 		running[card.id] = Task { await expand(card) }
 	}
 
+	/// 送給模型的「題目」欄：知識點樹與直接問的樹沒有題目，講清楚它是什麼
+	private func topicContext(_ topic: Card) -> String {
+		switch topic.kind {
+		case .note: "概念「\(topic.title)」的知識問題，不針對特定題目"
+		case .free: "他直接問的問題（沒有特定題目）：\(topic.problem ?? topic.title)"
+		default: topic.title
+		}
+	}
+
 	/// 標 MainActor 是為了讓 Task 的第一步一定是切回主執行緒 ——
 	/// 這個 suspension 保證 start 那行把 Task 存進 running 之後，defer 才有機會清掉它
 	@MainActor
@@ -530,9 +546,7 @@ struct CardTreeView: View {
 		defer { running[card.id] = nil }
 		do {
 			let result = try await store.ai.expand(
-				topic: topic.kind == .note
-					? "概念「\(topic.title)」的知識問題，不針對特定題目"
-					: topic.title,
+				topic: topicContext(topic),
 				diagnosis: topic.body ?? "",
 				transcript: topic.transcript,
 				explained: topic.explainedLines(),

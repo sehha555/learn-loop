@@ -24,17 +24,77 @@ struct LearnLoopApp: App {
 			TabView {
 				TopicListView(store: store)
 					.tabItem { Label("題目", systemImage: "list.bullet") }
-				NavigationStack {
-					ConceptListView(store: store)
-						.conceptDestinations(store: store)
-				}
-				.tabItem { Label("概念", systemImage: "tag") }
+				AskTabView(store: store)
+					.tabItem { Label("概念", systemImage: "tag") }
 			}
 			// 從分享浮層回到主 app 時，樹可能已經被改過
 			.onReceive(
 				NotificationCenter.default.publisher(
 					for: UIApplication.willEnterForegroundNotification)
 			) { _ in store.load() }
+		}
+	}
+}
+
+/// 概念 tab：上面是概念總覽，底下一格「直接問」—— 唸書時沒題目也能問，
+/// 答案長成跟題目一樣的樹、歸到模型判的概念下
+struct AskTabView: View {
+	@ObservedObject var store: CardStore
+	@State private var path = NavigationPath()
+	@State private var question = ""
+	@State private var asking = false
+	@State private var errorMessage: String?
+
+	var body: some View {
+		NavigationStack(path: $path) {
+			ConceptListView(store: store)
+				.conceptDestinations(store: store)
+				.safeAreaInset(edge: .bottom) { askBar }
+				.alert("沒辦法處理", isPresented: .constant(errorMessage != nil)) {
+					Button("好") { errorMessage = nil }
+				} message: {
+					Text(errorMessage ?? "")
+				}
+		}
+	}
+
+	private var askBar: some View {
+		HStack(spacing: 8) {
+			if asking {
+				ProgressView()
+				Text("想一下…").foregroundStyle(.secondary)
+			} else {
+				TextField("直接問（不用貼題目）…", text: $question)
+					.textFieldStyle(.roundedBorder)
+					.submitLabel(.go)
+					.onSubmit { ask() }
+				if !question.trimmingCharacters(in: .whitespaces).isEmpty {
+					Button("問") { ask() }
+						.buttonStyle(.borderedProminent)
+						.buttonBorderShape(.capsule)
+				}
+			}
+		}
+		.frame(maxWidth: .infinity)
+		.padding(.horizontal)
+		.padding(.vertical, 10)
+		.background(.bar)
+	}
+
+	@MainActor
+	private func ask() {
+		let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !text.isEmpty, !asking, store.hasProvider else { return }
+		asking = true
+		Task { @MainActor in
+			defer { asking = false }
+			do {
+				// 答完直接跳進那棵樹
+				path.append(try await store.ask(question: text))
+				question = ""
+			} catch {
+				errorMessage = error.localizedDescription
+			}
 		}
 	}
 }

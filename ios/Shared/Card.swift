@@ -16,6 +16,7 @@ struct Card: Identifiable, Codable, Hashable {
 		case extend      // 更難或更一般的版本
 		case custom      // 你自己加的 —— AI 沒猜到的才是最有價值的資料
 		case note        // 一個概念的知識點（不針對題目的問答都掛在這棵樹下），每個概念最多一棵
+		case free        // 直接問的（沒貼題目）—— 自成一棵樹，歸到模型判的概念下
 	}
 
 	/// 這一題當下的狀態。診斷時模型判斷，存下來當「卡過幾次」的依據。

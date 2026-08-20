@@ -108,6 +108,33 @@ struct ConceptPageView: View {
 			ForEach(tagged, id: \.card.id) { item in
 				noteCard(item.card, source: item.topic)
 			}
+			// 直接問的（沒貼題目），整棵樹就是一個知識點
+			ForEach(store.freeQuestions(for: name)) { tree in
+				NavigationLink(value: tree.id) {
+					VStack(alignment: .leading, spacing: 4) {
+						HStack(alignment: .firstTextBaseline, spacing: 6) {
+							Text(Card.Kind.free.mark)
+								.font(.caption2.weight(.bold))
+								.foregroundStyle(Card.Kind.free.tint)
+							MathText(text: tree.problem ?? tree.title, font: .subheadline.weight(.semibold), size: 15)
+								.multilineTextAlignment(.leading)
+						}
+						if let body = tree.body {
+							MathText(text: body, font: .callout, size: 15)
+								.foregroundStyle(.primary.opacity(0.85))
+								.padding(.leading, 16)
+						}
+						Text("直接問的 · \(tree.children.count) 個點")
+							.font(.caption2)
+							.foregroundStyle(.tertiary)
+							.padding(.leading, 16)
+					}
+					.padding(10)
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+				}
+				.buttonStyle(.plain)
+			}
 			if let note {
 				NavigationLink(value: note.id) {
 					Label("打開知識點樹（可以接著追問）", systemImage: "arrow.turn.down.right")

@@ -12,8 +12,13 @@ final class CardStore: ObservableObject {
 
 	@Published private(set) var topics: [Card] = []
 
-	/// 真正的題目（不含概念知識點那種樹）。清單、統計、病歷卡的題目紀錄都看這個
-	var problems: [Card] { topics.filter { $0.kind != .note } }
+	/// 真正的題目（不含概念知識點、直接問的那些樹）。清單、統計、病歷卡的題目紀錄都看這個
+	var problems: [Card] { topics.filter { $0.kind != .note && $0.kind != .free } }
+
+	/// 直接問的問題裡歸到這個概念的（新到舊）
+	func freeQuestions(for concept: String) -> [Card] {
+		topics.filter { $0.kind == .free && $0.concepts.contains(concept) }
+	}
 
 	/// 是否真的拿到共享目錄。false 代表現在是免費簽章，主 app 與浮層各存各的。
 	let isShared: Bool
@@ -292,6 +297,22 @@ final class CardStore: ObservableObject {
 	/// 題目原始截圖。nil 代表這題是存圖功能上線前貼的，沒圖可看
 	func image(for topicID: UUID) -> UIImage? {
 		UIImage(contentsOfFile: imageFileURL(topicID).path)
+	}
+
+	/// 直接問（沒貼題目）：問題自成一棵樹，歸到模型判的概念下，回傳新樹 id
+	func ask(question: String) async throws -> UUID {
+		let result = try await ai
+			.ask(question: question, knownConcepts: conceptNamesForPrompt(limit: 50))
+		let tree = Card(
+			title: result.title,
+			body: result.status,
+			kind: .free,
+			children: result.points.map { Card(title: $0.title, kind: $0.kind) },
+			concepts: result.concepts,
+			problem: question
+		)
+		insert(tree)
+		return tree.id
 	}
 
 	/// 貼上 / 分享進來的完整流程：概念清單 → 診斷 → 組題目 → 存檔，回傳新題 id。
