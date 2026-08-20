@@ -15,6 +15,7 @@ struct Card: Identifiable, Codable, Hashable {
 		case trap        // 很多人在這裡踩雷
 		case extend      // 更難或更一般的版本
 		case custom      // 你自己加的 —— AI 沒猜到的才是最有價值的資料
+		case note        // 一個概念的知識點（不針對題目的問答都掛在這棵樹下），每個概念最多一棵
 	}
 
 	/// 這一題當下的狀態。診斷時模型判斷，存下來當「卡過幾次」的依據。
@@ -43,6 +44,10 @@ struct Card: Identifiable, Codable, Hashable {
 	/// 診斷時把圖片抄成的文字（LaTeX）。追問時送這段代替重傳圖。
 	/// nil = 本欄位上線前存的題目。只有 topic 層有值。
 	var transcript: String?
+	/// 題目原文（只有題目、不含他寫的過程）。清單預覽顯示這個。nil = 上線前的舊題或筆記
+	var problem: String?
+	/// 使用者把這個節點收起來了。存檔而不是放在畫面狀態裡 —— 離開再回來要記得
+	var collapsed: Bool
 
 	init(
 		id: UUID = UUID(),
@@ -53,7 +58,9 @@ struct Card: Identifiable, Codable, Hashable {
 		createdAt: Date = Date(),
 		concepts: [String] = [],
 		situation: Situation? = nil,
-		transcript: String? = nil
+		transcript: String? = nil,
+		problem: String? = nil,
+		collapsed: Bool = false
 	) {
 		self.id = id
 		self.title = title
@@ -64,6 +71,8 @@ struct Card: Identifiable, Codable, Hashable {
 		self.concepts = concepts
 		self.situation = situation
 		self.transcript = transcript
+		self.problem = problem
+		self.collapsed = collapsed
 	}
 
 	/// 手寫的 init —— kind 是後來才加的欄位，舊存檔沒有它。
@@ -79,6 +88,8 @@ struct Card: Identifiable, Codable, Hashable {
 		concepts = try container.decodeIfPresent([String].self, forKey: .concepts) ?? []
 		situation = try container.decodeIfPresent(Situation.self, forKey: .situation)
 		transcript = try container.decodeIfPresent(String.self, forKey: .transcript)
+		problem = try container.decodeIfPresent(String.self, forKey: .problem)
+		collapsed = try container.decodeIfPresent(Bool.self, forKey: .collapsed) ?? false
 	}
 
 	var isExpanded: Bool { body != nil }
@@ -122,6 +133,26 @@ extension Card {
 		}
 		for child in children { lines.append(contentsOf: child.explainedLines(prefix: here)) }
 		return lines
+	}
+
+	/// 找到指定節點（唯讀）
+	func find(_ target: UUID) -> Card? {
+		if id == target { return self }
+		for child in children {
+			if let hit = child.find(target) { return hit }
+		}
+		return nil
+	}
+
+	/// 把指定節點整棵摘下來，回傳摘下的那棵；找不到回傳 nil
+	mutating func remove(id target: UUID) -> Card? {
+		if let index = children.firstIndex(where: { $0.id == target }) {
+			return children.remove(at: index)
+		}
+		for index in children.indices {
+			if let hit = children[index].remove(id: target) { return hit }
+		}
+		return nil
 	}
 
 	/// 從根到指定節點的標題路徑 —— 追問時要把這條路徑餵給模型當脈絡

@@ -63,6 +63,7 @@ extension Card.Kind {
 		case .extend: "↗"
 		case .custom: "✎"
 		case .topic: "◆"
+		case .note: "◇"
 		}
 	}
 
@@ -75,6 +76,7 @@ extension Card.Kind {
 		case .extend: .purple
 		case .custom: .pink
 		case .topic: .accentColor
+		case .note: .accentColor
 		}
 	}
 }
@@ -90,7 +92,9 @@ struct CardTreeView: View {
 
 	/// 進行中的展開請求。存 Task 而不是單純的 id，是為了讓使用者再點一下就取消
 	@State private var running: [UUID: Task<Void, Never>] = [:]
-	@State private var collapsed: Set<UUID> = []
+	/// 追問接點：自己打的問題掛在哪個節點下。nil = 題目根部（另起一條線）。
+	/// 每次展開完自動指到剛展開的節點，連問就串成一條線
+	@State private var attachID: UUID?
 	@State private var ownQuestion = ""
 	@State private var errorText: String?
 	@State private var showingTranscript = false
@@ -150,7 +154,7 @@ struct CardTreeView: View {
 		func walk(_ cards: [Card], _ depth: Int) {
 			for card in cards {
 				out.append((card, depth))
-				if !collapsed.contains(card.id) { walk(card.children, depth + 1) }
+				if !card.collapsed { walk(card.children, depth + 1) }
 			}
 		}
 		walk(topic.children, 0)
@@ -280,14 +284,35 @@ struct CardTreeView: View {
 
 			VStack(alignment: .leading, spacing: 6) {
 				title(card)
-				if let body = card.body, !collapsed.contains(card.id) {
+				if let body = card.body, !card.collapsed {
 					stepBody(body)
 						.padding(.leading, 22)
 						.padding(.trailing, 4)
+					if card.kind == .custom, let topic, topic.kind != .note,
+						!topic.concepts.isEmpty {
+						moveToNoteMenu(card, concepts: topic.concepts)
+							.padding(.leading, 22)
+					}
 				}
 			}
 		}
 		.padding(.vertical, 3)
+	}
+
+	/// 這個問題其實不關這一題、關概念 —— 搬到概念的知識點下，題目頁就不會越長越長。
+	/// 你按才搬，不讓模型猜
+	private func moveToNoteMenu(_ card: Card, concepts: [String]) -> some View {
+		Menu {
+			ForEach(concepts, id: \.self) { name in
+				Button("存到「\(name)」知識點") {
+					if attachID == card.id { attachID = nil }
+					store.moveToNote(cardID: card.id, concept: name)
+				}
+			}
+		} label: {
+			Label("這不只關這題，存到知識點", systemImage: "arrow.turn.down.right")
+				.font(.caption)
+		}
 	}
 
 	/// 把 body 用換行切開，一行變一個帶編號的步驟 —— 讀起來像思緒一步步展開，
@@ -359,9 +384,8 @@ struct CardTreeView: View {
 				// 這裡先清掉的話下一次點會跟還沒結束的舊 Task 搶同一格
 				task.cancel()
 			} else if card.isExpanded {
-				// 展開過的：點一下收起來，再點打開
-				if collapsed.contains(card.id) { collapsed.remove(card.id) }
-				else { collapsed.insert(card.id) }
+				// 展開過的：點一下收起來，再點打開（落地存檔，離開再回來還記得）
+				store.toggleCollapsed(cardID: card.id)
 			} else {
 				start(expanding: card)
 			}
@@ -378,6 +402,17 @@ struct CardTreeView: View {
 				Spacer(minLength: 0)
 				if running[card.id] != nil {
 					ProgressView().controlSize(.small)
+				} else if card.isExpanded {
+					// 換接點：下一個問題接在這個節點下，岔出另一條線
+					Button {
+						attachID = attachID == card.id ? nil : card.id
+					} label: {
+						Image(systemName: "arrow.turn.down.right")
+							.font(.caption.weight(.semibold))
+							.foregroundStyle(attachID == card.id ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+							.padding(4)
+					}
+					.buttonStyle(.plain)
 				}
 			}
 			.frame(maxWidth: .infinity, alignment: .leading)
@@ -397,7 +432,7 @@ struct CardTreeView: View {
 	@ViewBuilder
 	private func marker(_ card: Card) -> some View {
 		if card.isExpanded {
-			Image(systemName: collapsed.contains(card.id) ? "chevron.right" : "chevron.down")
+			Image(systemName: card.collapsed ? "chevron.right" : "chevron.down")
 				.font(.caption2.weight(.bold))
 				.foregroundStyle(card.kind.tint)
 				.frame(width: 14)
@@ -412,12 +447,41 @@ struct CardTreeView: View {
 	// MARK: - 自己加一個點
 
 	private func askOwn(_ topic: Card) -> some View {
+		VStack(alignment: .leading, spacing: 6) {
+			if let attachID, let target = topic.find(attachID) {
+				HStack(spacing: 6) {
+					Text("接在：")
+						.font(.caption2)
+						.foregroundStyle(.secondary)
+					Button {
+						self.attachID = nil
+					} label: {
+						HStack(spacing: 4) {
+							Text(target.title).lineLimit(1)
+							Image(systemName: "xmark")
+						}
+						.font(.caption2)
+						.padding(.horizontal, 8)
+						.padding(.vertical, 3)
+						.background(Color(.tertiarySystemFill), in: Capsule())
+					}
+					.buttonStyle(.plain)
+				}
+			}
+			askField(topic)
+		}
+	}
+
+	private func askField(_ topic: Card) -> some View {
 		HStack(spacing: 8) {
 			Text(Card.Kind.custom.mark)
 				.font(.caption2.weight(.bold))
 				.foregroundStyle(Card.Kind.custom.tint)
 				.frame(width: 14)
-			TextField("我想問別的…", text: $ownQuestion)
+			TextField(
+				topic.kind == .note ? "問這個概念…" : (attachID == nil ? "我想問別的…" : "接著問…"),
+				text: $ownQuestion
+			)
 				.font(.subheadline)
 				.submitLabel(.go)
 				.onSubmit { askOwn(in: topic.id) }
@@ -434,13 +498,11 @@ struct CardTreeView: View {
 
 	private func askOwn(in topicID: UUID) {
 		let text = ownQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !text.isEmpty, let id = store.addCustom(topicID: topicID, title: text) else {
-			return
-		}
-		ownQuestion = ""
-		guard let card = store.topics.first(where: { $0.id == topicID })?
-			.children.first(where: { $0.id == id })
+		guard !text.isEmpty,
+			let id = store.addCustom(topicID: topicID, parentID: attachID, title: text)
 		else { return }
+		ownQuestion = ""
+		guard let card = store.topics.first(where: { $0.id == topicID })?.find(id) else { return }
 		start(expanding: card)
 	}
 
@@ -458,7 +520,9 @@ struct CardTreeView: View {
 		defer { running[card.id] = nil }
 		do {
 			let result = try await store.ai.expand(
-				topic: topic.title,
+				topic: topic.kind == .note
+					? "概念「\(topic.title)」的知識問題，不針對特定題目"
+					: topic.title,
 				diagnosis: topic.body ?? "",
 				transcript: topic.transcript,
 				explained: topic.explainedLines(),
@@ -467,6 +531,8 @@ struct CardTreeView: View {
 				wantFollowUps: card.kind != .custom
 			)
 			store.expand(cardID: card.id, body: result.body, followUps: result.followUps)
+			// 剛講完的東西就是下一個問題最可能接的地方
+			attachID = card.id
 		} catch {
 			// 使用者自己按掉的不是出錯，不要跳 alert。
 			// URLSession 被中斷時丟的是 URLError.cancelled，不是 CancellationError

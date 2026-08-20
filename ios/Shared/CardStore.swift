@@ -12,6 +12,9 @@ final class CardStore: ObservableObject {
 
 	@Published private(set) var topics: [Card] = []
 
+	/// 真正的題目（不含概念知識點那種樹）。清單、統計、病歷卡的題目紀錄都看這個
+	var problems: [Card] { topics.filter { $0.kind != .note } }
+
 	/// 是否真的拿到共享目錄。false 代表現在是免費簽章，主 app 與浮層各存各的。
 	let isShared: Bool
 
@@ -104,13 +107,57 @@ final class CardStore: ObservableObject {
 	}
 
 	/// 使用者自己加的點。AI 沒猜到的那些，正好告訴我們猜得準不準。
+	/// parentID 是接點：接在某個節點下就串成一條線（CoT），nil 接在題目根部＝另起一條。
 	/// 回傳新節點的 id，讓呼叫端接著展開它。
-	func addCustom(topicID: UUID, title: String) -> UUID? {
+	func addCustom(topicID: UUID, parentID: UUID?, title: String) -> UUID? {
 		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return nil }
 		let card = Card(title: title, kind: .custom)
-		topics[index].children.append(card)
+		let hit = topics[index].update(id: parentID ?? topicID) { parent in
+			parent.children.append(card)
+			// 接點收著的話新問題會被藏起來，順手打開
+			parent.collapsed = false
+		}
+		guard hit else { return nil }
 		save()
 		return card.id
+	}
+
+	/// 收合／展開一個節點，落地存檔
+	func toggleCollapsed(cardID: UUID) {
+		for index in topics.indices {
+			if topics[index].update(id: cardID, { $0.collapsed.toggle() }) { break }
+		}
+		save()
+	}
+
+	// MARK: - 概念知識點
+
+	/// 某個概念的知識點樹（不針對題目的問答）。沒有就是還沒問過
+	func noteTopic(for concept: String) -> Card? {
+		topics.first { $0.kind == .note && $0.concepts == [concept] }
+	}
+
+	/// 拿到（必要時建立）概念的知識點樹。一個概念一棵，掛在 topics 裡跟題目同一套樹機制，
+	/// 但 kind 是 note，清單與統計都會略過它
+	func ensureNoteTopic(for concept: String) -> UUID {
+		if let existing = noteTopic(for: concept) { return existing.id }
+		let note = Card(title: concept, kind: .note, concepts: [concept])
+		topics.append(note)  // 放最後面，不擠掉題目的時間序
+		save()
+		return note.id
+	}
+
+	/// 把題目樹裡的一個問題（整條線）搬到概念的知識點下 —— 它跟這題無關、跟概念有關
+	func moveToNote(cardID: UUID, concept: String) {
+		var moved: Card?
+		for index in topics.indices {
+			if let card = topics[index].remove(id: cardID) { moved = card; break }
+		}
+		guard let moved else { return }
+		let noteID = ensureNoteTopic(for: concept)
+		guard let index = topics.firstIndex(where: { $0.id == noteID }) else { return }
+		topics[index].children.append(moved)
+		save()
 	}
 
 	/// 使用者改過的抄錄。模型抄錯根號、上下標時，改這裡一次，之後追問全用對的版本
@@ -160,7 +207,7 @@ final class CardStore: ObservableObject {
 
 	/// 用到這個概念的題目（最新在前，topics 本來就這順序）—— 病歷卡的紀錄清單
 	func topics(withConcept name: String) -> [Card] {
-		topics.filter { $0.concepts.contains(name) }
+		problems.filter { $0.concepts.contains(name) }
 	}
 
 	/// 概念統計一次算完。「什麼算卡一次」只寫在這裡（situation == .stuck，
@@ -171,7 +218,7 @@ final class CardStore: ObservableObject {
 		var appearances: [String: Int] = [:]
 		var stuck: [String: Int] = [:]
 		var byTime: [String] = []
-		for topic in topics {
+		for topic in problems {
 			for name in topic.concepts {
 				if appearances[name] == nil { byTime.append(name) }
 				appearances[name, default: 0] += 1
@@ -204,7 +251,7 @@ final class CardStore: ObservableObject {
 	/// 最後一次卡這個概念是哪天 —— 總覽「該回頭看的」照這個排，越近越前面。
 	/// topics 新到舊，所以第一個命中的就是最近的
 	func lastStuckDate(_ name: String) -> Date? {
-		topics.first { $0.situation == .stuck && $0.concepts.contains(name) }?.createdAt
+		problems.first { $0.situation == .stuck && $0.concepts.contains(name) }?.createdAt
 	}
 
 	/// 跟這個概念在同一題出現過的其他概念，常一起出現的排前面（同分照筆畫穩定排）。
@@ -257,7 +304,8 @@ final class CardStore: ObservableObject {
 			children: result.points.map { Card(title: $0.title, kind: $0.kind) },
 			concepts: result.concepts,
 			situation: result.parsedSituation,
-			transcript: result.transcript
+			transcript: result.transcript,
+			problem: result.problem.isEmpty ? nil : result.problem
 		)
 		insert(topic)
 		// 原始截圖留檔 —— 病歷卡要能看到「題目長什麼樣」

@@ -130,6 +130,8 @@ struct AIClient {
 		/// 圖片抄成文字（數學式 LaTeX）。之後追問都送這段而不是重傳圖 ——
 		/// 模型要看得到題目本體，才不會對著標題瞎猜
 		let transcript: String
+		/// 題目原文（不含他寫的過程）。清單預覽用；筆記類給空字串
+		let problem: String
 		/// 這題用到的概念名。跨題累積，之後長成 wiki / graph
 		let concepts: [String]
 		let points: [Point]
@@ -189,6 +191,8 @@ struct AIClient {
 	第六步，給 transcript：把圖片裡的內容照實抄成文字 —— 題目原文、他寫的每一步算式、
 	塗改和問號也用文字註明（例如「（此行劃掉）」「（打問號）」）。
 	數學式用 LaTeX。只抄，不補不改不解釋；之後他追問時看的就是這份，抄錯會一路錯。
+	另外給 problem：只有題目本身那一句（含題號也無妨），不含他寫的過程；
+	is_problem 是 false 時 problem 給空字串。
 
 	title（最外層那個）是這一題（或這份筆記）的名字，四到八個字。
 
@@ -224,6 +228,7 @@ struct AIClient {
 			"status": ["type": "string"],
 			"is_problem": ["type": "boolean"],
 			"transcript": ["type": "string"],
+			"problem": ["type": "string"],
 			// minItems 是做給 Gemini 看的：沒有它，模型會偷懶回空清單
 			"concepts": [
 				"type": "array", "items": ["type": "string"],
@@ -235,7 +240,8 @@ struct AIClient {
 			],
 		],
 		"required": [
-			"title", "situation", "status", "is_problem", "transcript", "concepts", "points",
+			"title", "situation", "status", "is_problem", "transcript", "problem", "concepts",
+			"points",
 		],
 	]
 
