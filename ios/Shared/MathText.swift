@@ -23,7 +23,7 @@ struct MathText: View {
 		Self.segments(of: text).reduce(Text(verbatim: "")) { acc, segment in
 			switch segment {
 			case let .plain(raw):
-				return acc + Text(verbatim: raw)
+				return acc + Self.boldAware(raw)
 			case let .math(latex):
 				guard let rendered = Self.render(latex, size: size) else {
 					// 式子有語法錯畫不出來時，把原文還回去，不要整段吃掉
@@ -34,6 +34,22 @@ struct MathText: View {
 				return acc + Text("\(Image(uiImage: rendered.image))")
 					.baselineOffset(-rendered.descent)
 			}
+		}
+	}
+
+	/// 「完整解法」口吻會用 **…** 強調。成對的才加粗，落單的星號原樣保留
+	private static func boldAware(_ raw: String) -> Text {
+		let parts = raw.components(separatedBy: "**")
+		guard parts.count >= 3 else { return Text(verbatim: raw) }
+		return parts.enumerated().reduce(Text(verbatim: "")) { acc, item in
+			let (index, part) = item
+			// 奇數段夾在兩個 ** 之間；最後一段若沒有收尾的 ** 就把星號還回去
+			if index % 2 == 1 {
+				return index == parts.count - 1
+					? acc + Text(verbatim: "**" + part)
+					: acc + Text(verbatim: part).bold()
+			}
+			return acc + Text(verbatim: part)
 		}
 	}
 

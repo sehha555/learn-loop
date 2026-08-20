@@ -94,6 +94,8 @@ struct CardTreeView: View {
 	@State private var ownQuestion = ""
 	@State private var errorText: String?
 	@State private var showingTranscript = false
+	/// 口吻的本地鏡像 —— store 的 teachingStyle 直接寫 UserDefaults、不會觸發重繪
+	@State private var style: TeachingStyle = .plain
 	@State private var transcriptDraft = ""
 
 	private var topic: Card? { store.topics.first { $0.id == topicID } }
@@ -131,6 +133,7 @@ struct CardTreeView: View {
 				.padding()
 			}
 		}
+		.onAppear { style = store.teachingStyle }
 		.alert("出錯了", isPresented: .constant(errorText != nil)) {
 			Button("好") { errorText = nil }
 		} message: {
@@ -159,9 +162,13 @@ struct CardTreeView: View {
 	/// 層級刻意反過來：診斷那一句話才是主角（最大字），標題退成小字只做識別。
 	private func header(_ topic: Card) -> some View {
 		VStack(alignment: .leading, spacing: 6) {
-			Text(topic.title)
-				.font(.caption)
-				.foregroundStyle(.secondary)
+			HStack {
+				Text(topic.title)
+					.font(.caption)
+					.foregroundStyle(.secondary)
+				Spacer()
+				stylePicker
+			}
 			if let body = topic.body {
 				MathText(text: body, font: .headline, size: 17)
 			}
@@ -191,6 +198,20 @@ struct CardTreeView: View {
 		.frame(maxWidth: .infinity, alignment: .leading)
 		.padding(14)
 		.background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+	}
+
+	/// 在問答頁直接換口吻，不用跑去設定頁。只影響之後展開的點，已經生好的不重生
+	private var stylePicker: some View {
+		Menu {
+			Picker("口吻", selection: $style) {
+				ForEach(TeachingStyle.allCases, id: \.self) { Text($0.label).tag($0) }
+			}
+		} label: {
+			Label(style.label, systemImage: "text.bubble")
+				.font(.caption)
+				.labelStyle(.titleAndIcon)
+		}
+		.onChange(of: style) { _, new in store.teachingStyle = new }
 	}
 
 	/// 模型抄下來的圖片內容。預設收著（頁面已經夠長），展開看它抄對沒、錯了就改 ——
@@ -277,18 +298,57 @@ struct CardTreeView: View {
 			.split(separator: "\n", omittingEmptySubsequences: true)
 			.map { $0.trimmingCharacters(in: .whitespaces) }
 			.filter { !$0.isEmpty }
+		// 「完整解法」口吻帶小標／獨立式子／條列記號，那就是講義體，不套步驟編號
+		let structured = lines.contains {
+			$0.hasPrefix("## ") || $0.hasPrefix("$$") || $0.hasPrefix("- ")
+		}
 		return VStack(alignment: .leading, spacing: 8) {
 			ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-				HStack(alignment: .firstTextBaseline, spacing: 8) {
-					Text("\(index + 1)")
-						.font(.caption2.weight(.bold))
-						.foregroundStyle(.secondary)
-						.frame(width: 16, height: 16)
-						.background(Color(.tertiarySystemFill), in: Circle())
-					MathText(text: line, font: .callout, size: 16)
-						.foregroundStyle(.primary.opacity(0.85))
+				if structured {
+					structuredLine(line)
+				} else {
+					HStack(alignment: .firstTextBaseline, spacing: 8) {
+						Text("\(index + 1)")
+							.font(.caption2.weight(.bold))
+							.foregroundStyle(.secondary)
+							.frame(width: 16, height: 16)
+							.background(Color(.tertiarySystemFill), in: Circle())
+						MathText(text: line, font: .callout, size: 16)
+							.foregroundStyle(.primary.opacity(0.85))
+					}
 				}
 			}
+		}
+	}
+
+	/// 講義體的一行：## 小標、$$ 獨立式子、- 條列、關鍵是：結尾，其餘是一般句子
+	@ViewBuilder
+	private func structuredLine(_ line: String) -> some View {
+		if line.hasPrefix("## ") {
+			MathText(text: String(line.dropFirst(3)), font: .subheadline.weight(.semibold), size: 15)
+				.padding(.top, 6)
+		} else if line.hasPrefix("$$"), line.hasSuffix("$$"), line.count >= 4 {
+			MathText(
+				text: "$" + line.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces) + "$",
+				font: .callout, size: 18
+			)
+			.frame(maxWidth: .infinity, alignment: .center)
+			.padding(.vertical, 2)
+		} else if line.hasPrefix("- ") {
+			HStack(alignment: .firstTextBaseline, spacing: 8) {
+				Text("•").foregroundStyle(.secondary)
+				MathText(text: String(line.dropFirst(2)), font: .callout, size: 16)
+			}
+			.padding(.leading, 4)
+		} else if line.hasPrefix("關鍵是：") || line.hasPrefix("關鍵是:") {
+			MathText(text: line, font: .callout.weight(.semibold), size: 16)
+				.padding(10)
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+				.padding(.top, 4)
+		} else {
+			MathText(text: line, font: .callout, size: 16)
+				.foregroundStyle(.primary.opacity(0.85))
 		}
 	}
 
@@ -403,7 +463,8 @@ struct CardTreeView: View {
 				transcript: topic.transcript,
 				explained: topic.explainedLines(),
 				path: Array(path.dropFirst()), // 第一個是題目本身，模型已經知道
-				style: store.teachingStyle
+				style: store.teachingStyle,
+				wantFollowUps: card.kind != .custom
 			)
 			store.expand(cardID: card.id, body: result.body, followUps: result.followUps)
 		} catch {

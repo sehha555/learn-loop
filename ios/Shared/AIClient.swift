@@ -19,7 +19,7 @@ enum AIError: LocalizedError {
 
 /// 展開內容的教學口吻。使用者在設定裡切換，存 UserDefaults。
 enum TeachingStyle: String, CaseIterable {
-	case plain, guided, concise
+	case plain, guided, concise, worked
 
 	/// Picker 顯示用。跟 rawValue 分開 —— rawValue 存 UserDefaults，
 	/// 之後改顯示文案不會讓使用者存過的選擇失效
@@ -28,6 +28,30 @@ enum TeachingStyle: String, CaseIterable {
 		case .plain: "零基礎白話"
 		case .guided: "引導提問"
 		case .concise: "精簡條列"
+		case .worked: "完整解法"
+		}
+	}
+
+	/// body 的結構規則。前三種是「一行一步」的短步驟；
+	/// 完整解法是整段算完的講義體（小標、獨立式子、條列、結尾一句關鍵），
+	/// 樹頁看到這些記號就換成對應的版式
+	var bodyRule: String {
+		switch self {
+		case .worked:
+			"""
+			body 是一段完整的講解，把這一點從頭算到結果，可以給答案。結構用這些記號：
+			- 小標一行，開頭放「## 」（例如「## 解未知數：先代根，再比係數」），2 到 4 個
+			- 要獨立成一行的重要式子，單獨一行、前後用 $$ 包起來
+			- 並列的小點一行一個，開頭放「- 」
+			- 一般句子直接寫；句子裡要強調的詞用 **粗體**
+			- 最後一行以「關鍵是：」開頭，一句話講這一點的核心想法
+			每行之間用換行分開。不要前言、不要總結以外的客套。
+			"""
+		default:
+			"""
+			body 拆成 2 到 5 個短步驟，一步一行、用換行分開。每行不要自己加編號或符號，
+			前面會自動有記號。每步直接對他說「你」，不要前言不要總結。
+			"""
 		}
 	}
 
@@ -49,6 +73,11 @@ enum TeachingStyle: String, CaseIterable {
 		case .concise:
 			"""
 			口吻：直接講重點，短句、不解釋基本術語、不做類比。
+			"""
+		case .worked:
+			"""
+			口吻：像一份寫得好的講義，每一步交代為什麼這樣做，
+			技巧性的地方（代哪個值、為什麼比較這個係數）點出來。
 			"""
 		}
 	}
@@ -172,7 +201,7 @@ struct AIClient {
 	（例如「先把 $\\sqrt{2}$ 移到左邊」「展開 $(x+3)^2$」），不要用 $$。
 	只用基本 LaTeX 指令（\\frac、\\sqrt、\\int、^、_ 這類），
 	不要用 \\dfrac、\\displaystyle 這些排版變體，渲染器不認得。
-	不是數學式的地方不要出現 $。不要用 markdown。
+	不是數學式的地方不要出現 $。除了上面明確允許的記號以外不要用 markdown。
 	"""
 
 	/// diagnose 和 expand 的 point 結構相同，只差合法的 kind 清單
@@ -261,10 +290,19 @@ struct AIClient {
 	///   - explained: 這棵樹已經講過的內容（路徑 → 內容），讓模型接著講而不是重講或矛盾
 	///   - path: 從題目到這個點的標題路徑，讓模型知道在回答哪一層
 	///   - style: 使用者選的教學口吻
+	///   - wantFollowUps: 自己打的問題不要再長出「你可能想問」的點 —— 他要的是答案
 	func expand(
 		topic: String, diagnosis: String, transcript: String?, explained: [String],
-		path: [String], style: TeachingStyle
+		path: [String], style: TeachingStyle, wantFollowUps: Bool
 	) async throws -> Expansion {
+		let followUpRule =
+			wantFollowUps
+			? """
+			follow_ups 是這段解釋之後新冒出來、他可能會想再點的點，0 到 3 個。
+			   每個有 kind（question / supplement / trap / extend）和 title。
+			   沒有就給空陣列，不要硬湊。
+			"""
+			: "follow_ups 給空陣列。"
 		let prompt = """
 		題目：\(topic)
 		圖片上的內容（抄錄）：
@@ -286,12 +324,9 @@ struct AIClient {
 		follow_ups 給空陣列。
 
 		規則：
-		1. body 拆成 2 到 5 個短步驟，一步一行、用換行分開。每行不要自己加編號或符號，
-		   前面會自動有記號。每步直接對他說「你」，不要前言不要總結。
+		1. \(style.bodyRule)
 		2. \(style.promptRule)
-		3. follow_ups 是這段解釋之後新冒出來、他可能會想再點的點，0 到 3 個。
-		   每個有 kind（question / supplement / trap / extend）和 title。
-		   沒有就給空陣列，不要硬湊。
+		3. \(followUpRule)
 		4. 不要重複已經講過的東西；他問的如果指涉前面某一段（「第二步為什麼」「那個公式」），
 		   就對著那一段回答。
 		5. \(Self.formatRule)
