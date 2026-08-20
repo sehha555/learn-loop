@@ -40,6 +40,9 @@ struct Card: Identifiable, Codable, Hashable {
 	/// 兩種都是在編造沒發生過的事實。不知道就是不知道。
 	/// 跟 concepts 同樣的約定：只有 topic 層有值，子節點一律 nil。
 	var situation: Situation?
+	/// 診斷時把圖片抄成的文字（LaTeX）。追問時送這段代替重傳圖。
+	/// nil = 本欄位上線前存的題目。只有 topic 層有值。
+	var transcript: String?
 
 	init(
 		id: UUID = UUID(),
@@ -49,7 +52,8 @@ struct Card: Identifiable, Codable, Hashable {
 		children: [Card] = [],
 		createdAt: Date = Date(),
 		concepts: [String] = [],
-		situation: Situation? = nil
+		situation: Situation? = nil,
+		transcript: String? = nil
 	) {
 		self.id = id
 		self.title = title
@@ -59,6 +63,7 @@ struct Card: Identifiable, Codable, Hashable {
 		self.createdAt = createdAt
 		self.concepts = concepts
 		self.situation = situation
+		self.transcript = transcript
 	}
 
 	/// 手寫的 init —— kind 是後來才加的欄位，舊存檔沒有它。
@@ -73,6 +78,7 @@ struct Card: Identifiable, Codable, Hashable {
 		createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
 		concepts = try container.decodeIfPresent([String].self, forKey: .concepts) ?? []
 		situation = try container.decodeIfPresent(Situation.self, forKey: .situation)
+		transcript = try container.decodeIfPresent(String.self, forKey: .transcript)
 	}
 
 	var isExpanded: Bool { body != nil }
@@ -103,6 +109,19 @@ extension Card {
 			return true
 		}
 		return false
+	}
+
+	/// 子樹裡所有已展開節點的「路徑：內容」，追問時整包餵給模型當脈絡。
+	/// 樹很小（幾個節點、各幾行），全送比挑選便宜又不會漏
+	func explainedLines(prefix: [String] = []) -> [String] {
+		let here = prefix + [title]
+		var lines: [String] = []
+		// 題目本身的 body 是診斷那一句，已另外以「先前的診斷」送出，不重複
+		if let body, kind != .topic {
+			lines.append("\(here.joined(separator: " → "))：\(body)")
+		}
+		for child in children { lines.append(contentsOf: child.explainedLines(prefix: here)) }
+		return lines
 	}
 
 	/// 從根到指定節點的標題路徑 —— 追問時要把這條路徑餵給模型當脈絡

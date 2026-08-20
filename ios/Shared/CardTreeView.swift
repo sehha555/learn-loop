@@ -351,6 +351,8 @@ struct CardTreeView: View {
 			let result = try await store.ai.expand(
 				topic: topic.title,
 				diagnosis: topic.body ?? "",
+				transcript: topic.transcript,
+				explained: topic.explainedLines(),
 				path: Array(path.dropFirst()), // 第一個是題目本身，模型已經知道
 				style: store.teachingStyle
 			)

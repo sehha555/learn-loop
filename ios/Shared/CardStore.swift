@@ -249,7 +249,8 @@ final class CardStore: ObservableObject {
 			kind: .topic,
 			children: result.points.map { Card(title: $0.title, kind: $0.kind) },
 			concepts: result.concepts,
-			situation: result.parsedSituation
+			situation: result.parsedSituation,
+			transcript: result.transcript
 		)
 		insert(topic)
 		// 原始截圖留檔 —— 病歷卡要能看到「題目長什麼樣」
