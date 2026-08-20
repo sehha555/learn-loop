@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8787
@@ -84,6 +85,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/call":
             self._respond(404, {"error": "not found"})
             return
+        started = time.monotonic()
         try:
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length))
@@ -91,8 +93,13 @@ class Handler(BaseHTTPRequestHandler):
                 body["prompt"], body.get("image_base64"), body["schema"]
             )
             self._respond(200, result)
+        except BrokenPipeError:
+            # iPad 等不及先掛斷了（取消、逾時或連線斷掉），結果送不出去
+            print(f"  ↳ 算完了但 iPad 已斷線，耗時 {time.monotonic() - started:.0f} 秒")
         except Exception as error:  # 失敗一律回 500，app 端會自動退回 Gemini
             self._respond(500, {"error": str(error)})
+        else:
+            print(f"  ↳ claude 耗時 {time.monotonic() - started:.0f} 秒")
 
     def log_message(self, format, *args):  # noqa: A002
         # 預設 log 會印完整路徑很吵，只留時間＋來源 IP＋方法＋狀態
