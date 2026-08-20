@@ -151,6 +151,7 @@ struct TopicListView: View {
 					.font(.caption2.weight(.semibold))
 			}
 			.contentShape(Rectangle())
+			.padding(.vertical, 4)
 		}
 		.buttonStyle(.plain)
 	}
@@ -174,11 +175,18 @@ struct TopicListView: View {
 	/// 預覽放題目原文（舊題沒抄就退回診斷句），底下一排概念 tag，主概念藍色
 	private func row(_ topic: Card) -> some View {
 		VStack(alignment: .leading, spacing: 5) {
-			Text(topic.title).font(.headline)
-			if let preview = topic.problem ?? topic.body {
-				MathText(text: preview, font: .caption, size: 12)
-					.foregroundStyle(.secondary)
-					.lineLimit(3)
+			// 大標就是題目本身，四到八個字的名字退成小字；舊題沒抄題目就還是名字當大標
+			if let problem = topic.problem {
+				Text(topic.title).font(.caption).foregroundStyle(.secondary)
+				MathText(text: problem, font: .subheadline.weight(.semibold), size: 15)
+					.lineLimit(4)
+			} else {
+				Text(topic.title).font(.headline)
+				if let body = topic.body {
+					MathText(text: body, font: .caption, size: 12)
+						.foregroundStyle(.secondary)
+						.lineLimit(2)
+				}
 			}
 			if !topic.concepts.isEmpty {
 				FlowLayout(spacing: 5) {
