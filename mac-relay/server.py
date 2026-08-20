@@ -95,8 +95,12 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(500, {"error": str(error)})
 
     def log_message(self, format, *args):  # noqa: A002
-        # 預設 log 會印完整路徑很吵，只留一行方法＋狀態
-        print(f"{self.command} {self.path} -> {args[-2] if len(args) >= 2 else ''}")
+        # 預設 log 會印完整路徑很吵，只留時間＋來源 IP＋方法＋狀態
+        # （來源 127.0.0.1 是 Mac 自己打的，區網 IP 才是 iPad）
+        print(
+            f"{self.log_date_time_string()} {self.client_address[0]} "
+            f"{self.command} {self.path} -> {args[-2] if len(args) >= 2 else ''}"
+        )
 
 
 if __name__ == "__main__":
