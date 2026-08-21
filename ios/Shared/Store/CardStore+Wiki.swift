@@ -57,7 +57,7 @@ extension CardStore {
 		let result = try await ai.compileWiki(
 			concept: concept, material: material, previous: wiki[concept], style: teachingStyle)
 		wiki[concept] = WikiPage(
-			what: result.what, stuck: result.stuck, gaps: result.gaps,
+			what: result.what, keyPoints: result.keyPoints, stuck: result.stuck, gaps: result.gaps,
 			compiledAt: Date(), materialCount: material.count, fallbackNote: result.fallbackNote)
 		saveWiki()
 	}

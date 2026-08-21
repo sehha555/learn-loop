@@ -5,6 +5,8 @@ import Foundation
 struct WikiPage: Codable {
 	/// 這概念是什麼 —— 用他自己問過的例子講
 	var what: String
+	/// 重點：這招怎麼用、步驟骨幹、該記的式子，一行一條。舊存檔沒有這欄所以 optional
+	var keyPoints: String?
 	/// 他實際卡過的地方，一行一條，具體到哪一步
 	var stuck: String
 	/// 材料裡露出來、但他還沒追問到的洞，一行一條

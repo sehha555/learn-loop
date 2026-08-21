@@ -30,12 +30,6 @@ struct ConceptPageView: View {
 	/// 問完跳進新樹。nil（分享浮層）就不顯示問的那格
 	var open: ((UUID) -> Void)?
 
-	/// 截圖進頁時從磁碟讀一次放這，body 重算不再碰 I/O
-	@State private var images: [UUID: UIImage] = [:]
-	/// 點縮圖放大看的那一題
-	@State private var zoomTopic: Card?
-	/// 展開看紀錄的題目
-	@State private var expanded: Set<UUID> = []
 	/// 整理頁進行中的請求。存 Task 是為了讓「取消」真的能中斷
 	@State private var compiling: Task<Void, Never>?
 	@State private var errorText: String?
@@ -45,28 +39,19 @@ struct ConceptPageView: View {
 			VStack(alignment: .leading, spacing: 20) {
 				header
 				wikiSection
+				problemsSection
 				notesSection
 				questionsSection
 				relatedSection
-				recordsSection
 			}
 			.padding()
 		}
 		.errorAlert($errorText)
 		.navigationTitle(name)
 		.navigationBarTitleDisplayMode(.inline)
+		// 第一次進來、有材料但還沒整理過：自動整理一次。之後有新材料才靠按鈕
 		.task(id: name) {
-			for topic in store.topics(withConcept: name) where images[topic.id] == nil {
-				images[topic.id] = store.image(for: topic.id)
-			}
-		}
-		.sheet(item: $zoomTopic) { topic in
-			if let image = images[topic.id] {
-				Image(uiImage: image)
-					.resizable()
-					.scaledToFit()
-					.padding()
-			}
+			if store.wiki[name] == nil, store.wikiNewCount(for: name) > 0 { compile() }
 		}
 	}
 
@@ -124,7 +109,10 @@ struct ConceptPageView: View {
 				}
 			}
 			if let page {
-				wikiBlock("是什麼", lines: [page.what])
+				wikiBlock("說明", lines: [page.what])
+				if let keyPoints = page.keyPoints {
+					wikiBlock("重點", lines: keyPoints.components(separatedBy: "\n"))
+				}
 				wikiBlock("你卡過的地方", lines: page.stuck.components(separatedBy: "\n"))
 				wikiBlock("還沒補的", lines: page.gaps.components(separatedBy: "\n"))
 				if let note = page.fallbackNote {
@@ -135,6 +123,10 @@ struct ConceptPageView: View {
 				Text("整理於 \(page.compiledAt.formatted(date: .abbreviated, time: .shortened)) · 讀了 \(page.materialCount) 筆材料")
 					.font(.caption2)
 					.foregroundStyle(.tertiary)
+			} else if compiling != nil {
+				Text("正在讀這個概念下的材料，寫說明和重點…")
+					.font(.caption)
+					.foregroundStyle(.secondary)
 			} else if newCount == 0 {
 				Text("還沒有材料。貼一題或問一個問題，歸到這個概念後就能整理。")
 					.font(.caption)
@@ -319,91 +311,36 @@ struct ConceptPageView: View {
 		}
 	}
 
-	private var recordsSection: some View {
-		VStack(alignment: .leading, spacing: 14) {
-			Text("題目（點了展開當時的紀錄）")
-				.font(.caption2)
-				.foregroundStyle(.tertiary)
-			ForEach(store.topics(withConcept: name)) { topic in
-				record(topic)
-			}
-		}
-	}
-
-	/// 一行索引：紅字＝當時卡住。點了原地展開，展開裡才有跳回樹的入口
-	private func record(_ topic: Card) -> some View {
-		VStack(alignment: .leading, spacing: 8) {
-			Button {
-				if expanded.contains(topic.id) {
-					expanded.remove(topic.id)
-				} else {
-					expanded.insert(topic.id)
-				}
-			} label: {
-				HStack(alignment: .firstTextBaseline, spacing: 8) {
-					Image(systemName: expanded.contains(topic.id) ? "chevron.down" : "chevron.right")
-						.font(.caption2.weight(.semibold))
-						.foregroundStyle(.tertiary)
-						.frame(width: 14)
-					Text(topic.title)
-						.font(.subheadline.weight(.semibold))
-						.foregroundStyle(topic.situation == .stuck ? .red : .primary)
-						.multilineTextAlignment(.leading)
-					Spacer(minLength: 8)
-					Text(topic.createdAt.formatted(.dateTime.month().day()))
-						.font(.caption2)
-						.foregroundStyle(.tertiary)
-				}
-				.frame(maxWidth: .infinity, alignment: .leading)
-			}
-			.buttonStyle(.plain)
-
-			if expanded.contains(topic.id) {
-				// 左邊一條線，跟樹頁同一套視覺 —— 底下的內容都掛在這筆題目下
-				HStack(alignment: .top, spacing: 0) {
-					TreeLine()
-
-					VStack(alignment: .leading, spacing: 8) {
-						if let image = images[topic.id] {
-							Button {
-								zoomTopic = topic
-							} label: {
-								// scaledToFit 整張圖完整可見 —— fill 會為了填滿寬度
-								// 把上下裁掉，題目截圖被裁就什麼都看不出來了
-								Image(uiImage: image)
-									.resizable()
-									.scaledToFit()
-									.frame(maxHeight: 180)
-									.clipShape(RoundedRectangle(cornerRadius: 8))
-							}
-							.buttonStyle(.plain)
-							.frame(maxWidth: .infinity, alignment: .leading)
+	/// 相關題目：一行一題，點了進樹。紅字＝當時卡住。截圖和紀錄都在樹頁，這裡只做索引
+	@ViewBuilder
+	private var problemsSection: some View {
+		let problems = store.topics(withConcept: name)
+		if !problems.isEmpty {
+			VStack(alignment: .leading, spacing: 8) {
+				Text("相關題目")
+					.font(.caption2)
+					.foregroundStyle(.tertiary)
+				ForEach(problems) { topic in
+					NavigationLink(value: topic.id) {
+						HStack(alignment: .firstTextBaseline, spacing: 8) {
+							KindMark(kind: .topic)
+							MathText(text: topic.problem ?? topic.title, font: .subheadline, size: 15)
+								.foregroundStyle(topic.situation == .stuck ? .red : .primary)
+								.lineLimit(2)
+								.multilineTextAlignment(.leading)
+							Spacer(minLength: 8)
+							Text(topic.createdAt.formatted(.dateTime.month().day()))
+								.font(.caption2)
+								.foregroundStyle(.tertiary)
+							Image(systemName: "chevron.right")
+								.font(.caption2.weight(.semibold))
+								.foregroundStyle(.tertiary)
 						}
-						if let body = topic.body {
-							MathText(text: "診斷：\(body)", font: .callout, size: 16)
-								.foregroundStyle(.primary.opacity(0.85))
-						}
-						ForEach(topic.children.filter { $0.kind == .custom }) { question in
-							HStack(alignment: .firstTextBaseline, spacing: 6) {
-								KindMark(kind: .custom)
-								Text("你問過：\(question.title)")
-									.font(.callout)
-									.foregroundStyle(.primary.opacity(0.85))
-									.fixedSize(horizontal: false, vertical: true)
-							}
-						}
-						if topic.expandedDescendants > 0 {
-							Text("點開過 \(topic.expandedDescendants) 個步驟")
-								.font(.caption)
-								.foregroundStyle(.secondary)
-						}
-						NavigationLink(value: topic.id) {
-							Label("打開這棵樹", systemImage: "arrow.turn.down.right")
-								.font(.caption.weight(.semibold))
-						}
-						.buttonStyle(.plain)
-						.foregroundStyle(.tint)
+						.padding(10)
+						.frame(maxWidth: .infinity, alignment: .leading)
+						.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
 					}
+					.buttonStyle(.plain)
 				}
 			}
 		}
