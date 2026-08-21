@@ -5,7 +5,7 @@ struct SettingsView: View {
 	@Environment(\.dismiss) private var dismiss
 	@State private var key = ""
 	@State private var relayAddress = ""
-	@State private var style: TeachingStyle = .plain
+	@State private var style: TeachingStyle = .direct
 
 	var body: some View {
 		NavigationStack {
@@ -40,7 +40,7 @@ struct SettingsView: View {
 				} header: {
 					Text("點開步驟時的講法")
 				} footer: {
-					Text("零基礎白話：每個術語都解釋、步驟切最細。引導提問：不給完答案，每步留一個小問題推你想。精簡條列：直接講重點。")
+					Text("兩種都分步驟。給提示：每步只講要做什麼、往哪走，不算完、不給結果，讓你自己算。直接給做法：每步寫到照著就能做。")
 				}
 				if !store.isShared {
 					Section {

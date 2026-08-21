@@ -59,20 +59,14 @@ struct AIClient {
 		var fallbackNote: String? { get set }
 	}
 
-	/// 輸出格式是全 client 的不變量，diagnose / ask / expand 共用一份，改一處全生效
-	private static let formatRule = formatRuleText(displayMath: false)
-
-	/// displayMath：「完整解法」口吻的獨立式子要用 $$ 包（見 bodyRule），
-	/// 其他地方一律禁 $$ —— 之前兩條規則打架，模型選擇遵守禁令，獨立式子從沒出現過
-	private static func formatRuleText(displayMath: Bool) -> String {
-		"""
+	/// 輸出格式是全 client 的不變量，每個呼叫共用一份，改一處全生效
+	private static let formatRule = """
 		全部繁體中文。數學式用 LaTeX 寫，前後各包一個 $ 直接混在句子裡
-		（例如「先把 $\\sqrt{2}$ 移到左邊」「展開 $(x+3)^2$」）\(displayMath ? "；只有要獨立成一行的重要式子才單獨一行、前後用 $$ 包" : "，不要用 $$")。
+		（例如「先把 $\\sqrt{2}$ 移到左邊」「展開 $(x+3)^2$」），不要用 $$。
 		只用基本 LaTeX 指令（\\frac、\\sqrt、\\int、^、_ 這類），
 		不要用 \\dfrac、\\displaystyle 這些排版變體，渲染器不認得。
-		不是數學式的地方不要出現 $。除了上面明確允許的記號以外不要用 markdown。
+		不是數學式的地方不要出現 $。不要用 markdown。
 		"""
-	}
 
 	/// diagnose 和 expand 的 point 結構相同，只差合法的 kind 清單
 	private static func pointSchema(kinds: [String]) -> [String: Any] {
@@ -208,7 +202,7 @@ struct AIClient {
 		  kind 用 question（要先弄懂的子問題）
 		  / supplement（接得上的補充）/ trap（常見誤解）/ extend（更一般的版本）。
 		  只是一份筆記、抽不出要問的點，points 就給空陣列，不要硬猜。
-		\(style.promptRule)
+		\(style.modeRule)
 
 		兩套都一樣：title 是一句話，不要在 title 裡回答它自己 —— 內容是他點下去才生的。
 
@@ -383,11 +377,11 @@ struct AIClient {
 
 		規則：
 		1. \(style.bodyRule)
-		2. \(style.promptRule)
+		2. \(style.modeRule)
 		3. \(followUpRule)
 		4. 不要重複已經講過的東西；他問的如果指涉前面某一段（「第二步為什麼」「那個公式」），
 		   就對著那一段回答。
-		5. \(Self.formatRuleText(displayMath: style == .worked))\(conceptRule)
+		5. \(Self.formatRule)\(conceptRule)
 		"""
 		let result: Expansion = try await call(
 			text: prompt,
@@ -467,7 +461,7 @@ struct AIClient {
 	/// 讀一個概念底下的原始材料，寫成固定三塊的整理頁。有上一版就修訂、不從零寫 ——
 	/// 從零寫每次措辭都變，他讀過的句子會消失
 	func compileWiki(
-		concept: String, material: [String], previous: WikiPage?, style: TeachingStyle
+		concept: String, material: [String], previous: WikiPage?
 	) async throws -> Compiled {
 		var prompt = """
 		你是坐在旁邊的助教，在幫使用者整理他對概念「\(concept)」的理解。
@@ -489,7 +483,6 @@ struct AIClient {
 		- gaps：材料裡露出來、但他還沒追問到的洞（某個步驟從沒點開、某個常見錯誤沒碰過、
 		  同一招的另一種情況沒練過）。一行一條，用換行分開，每行不要自己加編號或符號，兩到四條。
 
-		\(style.promptRule)
 		\(Self.formatRule)
 		"""
 		if let previous {

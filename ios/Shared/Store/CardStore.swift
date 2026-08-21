@@ -82,8 +82,7 @@ final class CardStore: ObservableObject {
 	/// 教學口吻，設定頁切換
 	var teachingStyle: TeachingStyle {
 		get {
-			defaults.string(forKey: "teachingStyle")
-				.flatMap(TeachingStyle.init(rawValue:)) ?? .plain
+			TeachingStyle.from(stored: defaults.string(forKey: "teachingStyle"))
 		}
 		set { defaults.set(newValue.rawValue, forKey: "teachingStyle") }
 	}

@@ -20,7 +20,7 @@ struct CardTreeView: View {
 	@State private var errorText: String?
 	@State private var showingTranscript = false
 	/// 口吻的本地鏡像 —— store 的 teachingStyle 直接寫 UserDefaults、不會觸發重繪
-	@State private var style: TeachingStyle = .plain
+	@State private var style: TeachingStyle = .direct
 	@State private var transcriptDraft = ""
 	/// 正在改的問題：自己打的節點、或直接問的根（root = true）
 	@State private var editing: (cardID: UUID, root: Bool)?

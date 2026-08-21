@@ -55,7 +55,7 @@ extension CardStore {
 	func compileWiki(for concept: String) async throws {
 		let material = wikiMaterial(for: concept)
 		let result = try await ai.compileWiki(
-			concept: concept, material: material, previous: wiki[concept], style: teachingStyle)
+			concept: concept, material: material, previous: wiki[concept])
 		wiki[concept] = WikiPage(
 			what: result.what, keyPoints: result.keyPoints, stuck: result.stuck, gaps: result.gaps,
 			compiledAt: Date(), materialCount: material.count, fallbackNote: result.fallbackNote)
