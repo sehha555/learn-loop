@@ -22,6 +22,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8787
+# 每次呼叫的 prompt 與回答都留一行，之後拿來看使用者都在問什麼、回頭改 app 端的 prompt。
+# 放在 Logs 不放 repo：repo 是 public，學習紀錄不該進 git
+CALLS_LOG = os.path.expanduser("~/Library/Logs/learn-loop-calls.jsonl")
 # claude 一次呼叫含思考可能要一兩分鐘，比照 app 端的等待上限
 CLAUDE_TIMEOUT = 180
 
@@ -95,6 +98,18 @@ def call_claude(prompt: str, image_b64: str | None, schema: dict) -> dict:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+def record_call(prompt: str, has_image: bool, result: dict, seconds: float) -> None:
+    entry = {
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "has_image": has_image,
+        "seconds": round(seconds),
+        "prompt": prompt,
+        "result": result,
+    }
+    with open(CALLS_LOG, "a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 class Handler(BaseHTTPRequestHandler):
     def _respond(self, code: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode()
@@ -121,6 +136,10 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             result = call_claude(
                 body["prompt"], body.get("image_base64"), body["schema"]
+            )
+            record_call(
+                body["prompt"], bool(body.get("image_base64")), result,
+                time.monotonic() - started,
             )
             self._respond(200, result)
         except BrokenPipeError:
