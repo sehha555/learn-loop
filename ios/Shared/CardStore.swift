@@ -360,7 +360,7 @@ final class CardStore: ObservableObject {
 		}
 		let result = try await ai.ask(
 			question: question, imageJPEG: imageData,
-			knownConcepts: conceptNamesForPrompt(limit: 50))
+			knownConcepts: conceptNamesForPrompt(limit: 50), style: teachingStyle)
 		let tree = Card(
 			title: result.title,
 			body: result.status,

@@ -56,6 +56,28 @@ enum TeachingStyle: String, CaseIterable {
 		}
 	}
 
+	/// 直接問（沒有題目、他就是在問問題）的開場句與點怎麼出。
+	/// 只有引導提問本質是「不給答案」，其他三種都給答案、只差講法 ——
+	/// 之前不分風格一律複述問題，使用者反應「你只是重複一遍我卡住的地方」
+	var askStatusRule: String {
+		switch self {
+		case .guided:
+			"""
+			- status：一句話，直接對他說「你」—— 不給答案，講這個問題的切入點在哪，
+			  結尾留一個有明確方向的小問題推他想（不是「你覺得呢」）。
+			- points：2 到 4 個可以點開的點，依他該想的順序排列，每個都是引導他往下想的一步。
+			"""
+		default:
+			"""
+			- status：一到兩句，直接對他說「你」—— 直接回答他問的事，給做法的骨幹
+			  （例如「這是多項式乘三角函數，分部積分做兩次，第一次把 $u^2$ 當 f」）。
+			  不要複述他的問題、不要只說「你在問的是…」。
+			- points：2 到 4 個可以點開的點，依理解順序排列，是骨幹裡每一步的展開
+			  （為什麼這樣選、下一步怎麼算、容易錯在哪），不是重講一次骨幹。
+			"""
+		}
+	}
+
 	/// 塞進 expand prompt 的口吻規則
 	var promptRule: String {
 		switch self {
@@ -315,9 +337,9 @@ struct AIClient {
 	/// 使用者唸書時直接打一個問題（沒有題目）。回答長成跟題目一樣的樹：
 	/// 一句定向 ＋ 幾個可以點開的點，而不是一整篇文章。
 	/// 可帶一張圖（課本的圖、筆記的一段）；問題可以空，那就是「這張圖在講什麼」
-	func ask(question: String, imageJPEG: Data? = nil, knownConcepts: [String]) async throws
-		-> Asked
-	{
+	func ask(
+		question: String, imageJPEG: Data? = nil, knownConcepts: [String], style: TeachingStyle
+	) async throws -> Asked {
 		var prompt = """
 		你是坐在旁邊的助教。使用者唸書時直接問了一個問題（沒有特定題目）：
 
@@ -329,11 +351,11 @@ struct AIClient {
 
 		輸出：
 		- title：這個問題的名字，四到八個字。
-		- status：一句話，直接對他說「你」—— 先講這個問題真正在問的是什麼、從哪裡切入。
-		  不要在這句就把答案講完，完整內容是他點下面的點才生的。
-		- points：2 到 4 個可以點開的點，依理解順序排列。kind 用 question（要先弄懂的子問題）
+		\(style.askStatusRule)
+		  kind 用 question（要先弄懂的子問題）
 		  / supplement（接得上的補充）/ trap（常見誤解）/ extend（更一般的版本）。
 		  title 是一句話，不要在 title 裡回答它自己。
+		\(style.promptRule)
 		- concepts：這個問題屬於的 1 到 4 個概念名，粒度像教科書目錄的小節
 		  （「和角公式」「牛頓第二定律」），不要科目名或整章的大詞，每個二到十個字。
 
