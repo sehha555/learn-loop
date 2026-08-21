@@ -127,7 +127,7 @@ struct ShareRootView: View {
 			return
 		}
 		do {
-			phase = .ready(try await store.analyze(image: image))
+			phase = .ready(try await store.ingest(text: "", image: image))
 		} catch {
 			phase = .failed(error.localizedDescription)
 		}

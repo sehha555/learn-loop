@@ -147,19 +147,9 @@ final class CardStore: ObservableObject {
 
 	// MARK: - 概念知識點
 
-	/// 某個概念的知識點樹（不針對題目的問答）。沒有就是還沒問過
+	/// 某個概念的知識點樹（統一入口之前，概念頁問的都掛這裡）。現在只讀不寫、照常顯示舊資料
 	func noteTopic(for concept: String) -> Card? {
 		topics.first { $0.kind == .note && $0.concepts == [concept] }
-	}
-
-	/// 拿到（必要時建立）概念的知識點樹。一個概念一棵，掛在 topics 裡跟題目同一套樹機制，
-	/// 但 kind 是 note，清單與統計都會略過它
-	func ensureNoteTopic(for concept: String) -> UUID {
-		if let existing = noteTopic(for: concept) { return existing.id }
-		let note = Card(title: concept, kind: .note, concepts: [concept])
-		topics.append(note)  // 放最後面，不擠掉題目的時間序
-		save()
-		return note.id
 	}
 
 	/// 手動改模型的判斷：標成某概念的知識（nil = 取消）
@@ -191,25 +181,6 @@ final class CardStore: ObservableObject {
 			}
 			if hit { break }
 		}
-		save()
-	}
-
-	/// 直接問的根問題改了：整棵重生（開場句、點、概念都換），id 與圖不變
-	func reask(topicID: UUID, question: String) async throws {
-		let imageData = try? Data(contentsOf: imageFileURL(topicID))
-		let result = try await ai.ask(
-			question: question, imageJPEG: imageData,
-			knownConcepts: conceptNamesForPrompt(), style: teachingStyle)
-		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return }
-		var tree = topics[index]
-		tree.title = result.title
-		tree.body = result.status
-		tree.children = result.points.map { Card(title: $0.title, kind: $0.kind) }
-		tree.concepts = result.concepts
-		tree.transcript = result.transcript
-		tree.problem = question
-		tree.fallbackNote = result.fallbackNote
-		topics[index] = tree
 		save()
 	}
 

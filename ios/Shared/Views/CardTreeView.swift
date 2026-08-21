@@ -463,60 +463,18 @@ struct CardTreeView: View {
 		}
 	}
 
-	private var canAskOwn: Bool {
-		ownImage != nil || !ownQuestion.trimmingCharacters(in: .whitespaces).isEmpty
-	}
-
 	private func askField(_ topic: Card) -> some View {
-		VStack(alignment: .leading, spacing: 6) {
-			if let ownImage {
-				HStack(spacing: 8) {
-					Image(uiImage: ownImage)
-						.resizable()
-						.scaledToFit()
-						.frame(height: 56)
-						.clipShape(RoundedRectangle(cornerRadius: 6))
-					Button("移除圖片", systemImage: "xmark.circle.fill") { self.ownImage = nil }
-						.labelStyle(.iconOnly)
-						.buttonStyle(.borderless)
-						.foregroundStyle(.secondary)
-				}
-			}
-			HStack(spacing: 8) {
-				Text(Card.Kind.custom.mark)
-					.font(.caption2.weight(.bold))
-					.foregroundStyle(Card.Kind.custom.tint)
-					.frame(width: 14)
-				PasteButton(payloadType: PastedImage.self) { pasted in
-					if let first = pasted.first { ownImage = first.image }
-				}
-				.labelStyle(.iconOnly)
-				.controlSize(.small)
-				.buttonBorderShape(.capsule)
-				TextField(
-					ownImage != nil
-						? "這張圖想問什麼？（可留空）"
-						: (topic.kind == .note ? "問這個概念…" : (attachID == nil ? "我想問別的…" : "接著問…")),
-					text: $ownQuestion
-				)
-					.font(.subheadline)
-					.submitLabel(.go)
-					.onSubmit { askOwn(in: topic.id) }
-				if canAskOwn {
-					Button("問") { askOwn(in: topic.id) }
-						.font(.subheadline.weight(.semibold))
-						.buttonStyle(.borderless)
-				}
-			}
-		}
-		.padding(.vertical, 7)
-		.padding(.horizontal, 10)
-		.background(Color.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+		AskField(
+			text: $ownQuestion, image: $ownImage,
+			placeholder: topic.kind == .note
+				? "問這個概念…" : (attachID == nil ? "我想問別的…" : "接著問…"),
+			running: false, onCancel: {}
+		) { askOwn(in: topic.id) }
 	}
 
 	private func askOwn(in topicID: UUID) {
 		let typed = ownQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard canAskOwn else { return }
+		guard ownImage != nil || !typed.isEmpty else { return }
 		let imageData = ownImage.flatMap(AIClient.jpeg(from:))
 		// 只貼圖沒打字，標題就寫明是在問圖
 		let text = typed.isEmpty ? "這張圖在講什麼？" : typed
@@ -572,7 +530,7 @@ struct CardTreeView: View {
 		if editing.root {
 			running[editing.cardID] = Task { @MainActor in
 				defer { running[editing.cardID] = nil }
-				do { try await store.reask(topicID: editing.cardID, question: text) } catch {
+				do { try await store.reask(topicID: editing.cardID, text: text) } catch {
 					guard !AIClient.isCancellation(error) else { return }
 					errorText = error.localizedDescription
 				}

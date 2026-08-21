@@ -117,3 +117,120 @@ struct PastedImage: Transferable {
 		}
 	}
 }
+
+/// 問問題的輸入列：貼圖、打字、送出，進行中可取消。
+/// 題目 tab、概念 tab、概念頁、樹頁追問四處共用 —— 之前各寫一份，
+/// 結果「追問不能貼圖」「這邊有取消那邊沒有」這種不對稱一直冒出來
+struct AskField: View {
+	@Binding var text: String
+	@Binding var image: UIImage?
+	var placeholder: String
+	var running: Bool
+	var onCancel: () -> Void
+	var onSubmit: () -> Void
+
+	private var canSubmit: Bool {
+		image != nil || !text.trimmingCharacters(in: .whitespaces).isEmpty
+	}
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 6) {
+			if let image, !running {
+				HStack(spacing: 8) {
+					Image(uiImage: image)
+						.resizable()
+						.scaledToFit()
+						.frame(height: 56)
+						.clipShape(RoundedRectangle(cornerRadius: 6))
+					Button("移除圖片", systemImage: "xmark.circle.fill") { self.image = nil }
+						.labelStyle(.iconOnly)
+						.buttonStyle(.borderless)
+						.foregroundStyle(.secondary)
+				}
+			}
+			HStack(spacing: 8) {
+				Text(Card.Kind.custom.mark)
+					.font(.caption2.weight(.bold))
+					.foregroundStyle(Card.Kind.custom.tint)
+					.frame(width: 14)
+				if !running {
+					// 用系統 PasteButton 才不會每次跳「允許貼上？」
+					PasteButton(payloadType: PastedImage.self) { pasted in
+						if let first = pasted.first { image = first.image }
+					}
+					.labelStyle(.iconOnly)
+					.controlSize(.small)
+					.buttonBorderShape(.capsule)
+				}
+				TextField(image == nil ? placeholder : "這張圖想問什麼？（可留空）", text: $text)
+					.font(.subheadline)
+					.submitLabel(.go)
+					.onSubmit(onSubmit)
+					.disabled(running)
+				if running {
+					ProgressView().controlSize(.small)
+					Button("取消", action: onCancel)
+						.font(.subheadline)
+						.buttonStyle(.borderless)
+				} else if canSubmit {
+					Button("問", action: onSubmit)
+						.font(.subheadline.weight(.semibold))
+						.buttonStyle(.borderless)
+				}
+			}
+		}
+		.padding(.vertical, 7)
+		.padding(.horizontal, 10)
+		.background(Color.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+	}
+}
+
+/// 統一入口的「問」列：題目截圖、直接問、在概念頁問，全部從這裡走 CardStore.ingest，
+/// 模型自己判斷是題目還是提問。答完把新樹的 id 交給 open，呼叫端負責跳進去
+struct AskBar: View {
+	@ObservedObject var store: CardStore
+	var placeholder: String
+	/// 在哪個概念頁問的，給模型當歸類提示
+	var hintConcept: String? = nil
+	var open: (UUID) -> Void
+
+	@State private var text = ""
+	@State private var image: UIImage?
+	/// 存 Task 是為了讓「取消」真的能中斷
+	@State private var asking: Task<Void, Never>?
+	@State private var errorMessage: String?
+
+	var body: some View {
+		AskField(
+			text: $text, image: $image, placeholder: placeholder, running: asking != nil,
+			onCancel: { asking?.cancel() }, onSubmit: submit
+		)
+		.alert("沒辦法處理", isPresented: .constant(errorMessage != nil)) {
+			Button("好") { errorMessage = nil }
+		} message: {
+			Text(errorMessage ?? "")
+		}
+	}
+
+	private func submit() {
+		let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !typed.isEmpty || image != nil, asking == nil else { return }
+		guard store.hasProvider else {
+			errorMessage = AIError.noAPIKey.localizedDescription
+			return
+		}
+		let image = image
+		asking = Task { @MainActor in
+			defer { asking = nil }
+			do {
+				let id = try await store.ingest(text: typed, image: image, hintConcept: hintConcept)
+				text = ""
+				self.image = nil
+				open(id)
+			} catch {
+				guard !AIClient.isCancellation(error) else { return }
+				errorMessage = error.localizedDescription
+			}
+		}
+	}
+}

@@ -6,14 +6,15 @@ import SwiftUI
 /// 注意：導覽全由 path 驅動 —— 混用舊式 NavigationLink(destination:) 會讓
 /// 新頁被插到它下面，看起來像「點了沒反應，要按返回才會出現」。
 extension View {
-	func conceptDestinations(store: CardStore) -> some View {
+	/// open：概念頁裡問完要跳進新樹，交給擁有 NavigationPath 的那層；nil = 該頁不提供問
+	func conceptDestinations(store: CardStore, open: ((UUID) -> Void)? = nil) -> some View {
 		navigationDestination(for: UUID.self) { id in
 			CardTreeView(topicID: id, store: store)
 				.navigationTitle(store.topics.first { $0.id == id }?.title ?? "")
 				.navigationBarTitleDisplayMode(.inline)
 		}
 		.navigationDestination(for: String.self) { name in
-			ConceptPageView(name: name, store: store)
+			ConceptPageView(name: name, store: store, open: open)
 		}
 	}
 }
@@ -26,6 +27,8 @@ extension View {
 struct ConceptPageView: View {
 	let name: String
 	@ObservedObject var store: CardStore
+	/// 問完跳進新樹。nil（分享浮層）就不顯示問的那格
+	var open: ((UUID) -> Void)?
 
 	/// 截圖進頁時從磁碟讀一次放這，body 重算不再碰 I/O
 	@State private var images: [UUID: UIImage] = [:]
@@ -33,16 +36,6 @@ struct ConceptPageView: View {
 	@State private var zoomTopic: Card?
 	/// 展開看紀錄的題目
 	@State private var expanded: Set<UUID> = []
-	@State private var noteQuestion = ""
-	/// 要跟問題一起送的圖
-	@State private var noteImage: UIImage?
-	/// 進行中的請求。存 Task 是為了讓「取消」真的能中斷
-	@State private var asking: Task<Void, Never>?
-	@State private var errorText: String?
-
-	private var canAskNote: Bool {
-		!noteQuestion.trimmingCharacters(in: .whitespaces).isEmpty || noteImage != nil
-	}
 
 	var body: some View {
 		ScrollView {
@@ -54,11 +47,6 @@ struct ConceptPageView: View {
 				recordsSection
 			}
 			.padding()
-		}
-		.alert("出錯了", isPresented: .constant(errorText != nil)) {
-			Button("好") { errorText = nil }
-		} message: {
-			Text(errorText ?? "")
 		}
 		.navigationTitle(name)
 		.navigationBarTitleDisplayMode(.inline)
@@ -103,7 +91,7 @@ struct ConceptPageView: View {
 		let note = store.noteTopic(for: name)
 		let tagged = store.taggedNotes(for: name)
 		VStack(alignment: .leading, spacing: 10) {
-			Text("知識點（不只關某一題的問答）")
+			Text("問過的（不只關某一題的問答）")
 				.font(.caption2)
 				.foregroundStyle(.tertiary)
 			if let note {
@@ -131,7 +119,7 @@ struct ConceptPageView: View {
 								.foregroundStyle(.primary.opacity(0.85))
 								.padding(.leading, 16)
 						}
-						Text("直接問的 · \(tree.children.count) 個點")
+						Text("問的 · \(tree.children.count) 個點")
 							.font(.caption2)
 							.foregroundStyle(.tertiary)
 							.padding(.leading, 16)
@@ -150,56 +138,9 @@ struct ConceptPageView: View {
 				.buttonStyle(.plain)
 				.foregroundStyle(.tint)
 			}
-			VStack(alignment: .leading, spacing: 6) {
-				if let noteImage, asking == nil {
-					HStack(spacing: 8) {
-						Image(uiImage: noteImage)
-							.resizable()
-							.scaledToFit()
-							.frame(height: 56)
-							.clipShape(RoundedRectangle(cornerRadius: 6))
-						Button("移除圖片", systemImage: "xmark.circle.fill") { self.noteImage = nil }
-							.labelStyle(.iconOnly)
-							.buttonStyle(.borderless)
-							.foregroundStyle(.secondary)
-					}
-				}
-				HStack(spacing: 8) {
-					Text(Card.Kind.custom.mark)
-						.font(.caption2.weight(.bold))
-						.foregroundStyle(Card.Kind.custom.tint)
-						.frame(width: 14)
-					if asking == nil {
-						PasteButton(payloadType: PastedImage.self) { pasted in
-							if let first = pasted.first { noteImage = first.image }
-						}
-						.labelStyle(.iconOnly)
-						.controlSize(.small)
-						.buttonBorderShape(.capsule)
-					}
-					TextField(
-						noteImage == nil ? "問這個概念…" : "這張圖想問什麼？（可留空）",
-						text: $noteQuestion
-					)
-					.font(.subheadline)
-					.submitLabel(.go)
-					.onSubmit { askNote() }
-					.disabled(asking != nil)
-					if asking != nil {
-						ProgressView().controlSize(.small)
-						Button("取消") { asking?.cancel() }
-							.font(.subheadline)
-							.buttonStyle(.borderless)
-					} else if canAskNote {
-						Button("問") { askNote() }
-							.font(.subheadline.weight(.semibold))
-							.buttonStyle(.borderless)
-					}
-				}
+			if let open {
+				AskBar(store: store, placeholder: "問這個概念…", hintConcept: name, open: open)
 			}
-			.padding(.vertical, 7)
-			.padding(.horizontal, 10)
-			.background(Color.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 		}
 	}
 
@@ -245,46 +186,6 @@ struct ConceptPageView: View {
 		.padding(10)
 		.frame(maxWidth: .infinity, alignment: .leading)
 		.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-	}
-
-	/// 在概念頁問：掛到這個概念的知識點樹根部，原地等答案。
-	/// 追問的追問去樹頁做（那裡有接點、取消這些機制）
-	private func askNote() {
-		let typed = noteQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard canAskNote, asking == nil else { return }
-		let imageData = noteImage.flatMap(AIClient.jpeg(from:))
-		// 只貼圖沒打字，標題就寫明是在問圖
-		let text = typed.isEmpty ? "這張圖在講什麼？" : typed
-		let noteID = store.ensureNoteTopic(for: name)
-		guard let id = store.addCustom(topicID: noteID, parentID: nil, title: text) else { return }
-		if let imageData { store.saveImage(imageData, for: id) }
-		noteQuestion = ""
-		noteImage = nil
-		asking = Task { @MainActor in
-			defer { asking = nil }
-			do {
-				let note = store.topics.first { $0.id == noteID }
-				let result = try await store.ai.expand(
-					topic: "概念「\(name)」的知識問題，不針對特定題目",
-					diagnosis: "",
-					transcript: nil,
-					explained: note?.explainedLines() ?? [],
-					path: [text],
-					style: store.teachingStyle,
-					wantFollowUps: false,
-					conceptChoices: store.conceptNamesForPrompt(),
-					imageJPEG: imageData
-				)
-				// 模型若判它其實屬於別的概念，標上去讓那一頁也列出來；判回本頁就不用標
-				store.expand(
-					cardID: id, body: result.body, followUps: result.followUps,
-					noteConcept: result.concept == name ? nil : result.concept,
-					fallbackNote: result.fallbackNote)
-			} catch {
-				guard !AIClient.isCancellation(error) else { return }
-				errorText = error.localizedDescription
-			}
-		}
 	}
 
 	/// 你在不同題裡對這個概念問過的問題，集結在最上面 ——

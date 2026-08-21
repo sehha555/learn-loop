@@ -46,53 +46,51 @@ extension CardStore {
 		save()
 	}
 
-	/// 直接問（沒貼題目）：問題自成一棵樹，歸到模型判的概念下，回傳新樹 id。
-	/// 可以帶一張圖（課本的圖、筆記的一段）；圖會抄成文字存進樹，之後追問才有脈絡
-	func ask(question: String, image: UIImage? = nil) async throws -> UUID {
+	/// 統一入口：題目截圖、直接問、概念頁問、分享進來的圖全走這一條。
+	/// 模型判斷是題目還是提問，題目存成題目樹（kind topic）、提問存成問答樹（kind free），
+	/// 都掛在模型判的概念下。回傳新樹的 id 讓畫面跳進去。
+	/// - hintConcept: 在哪個概念頁問的，給模型當歸類提示
+	func ingest(text: String, image: UIImage?, hintConcept: String? = nil) async throws -> UUID {
 		var imageData: Data?
 		if let image {
 			guard let data = AIClient.jpeg(from: image) else { throw AIError.badImage }
 			imageData = data
 		}
-		let result = try await ai.ask(
-			question: question, imageJPEG: imageData,
+		let result = try await ai.ingest(
+			text: text, imageJPEG: imageData, hintConcept: hintConcept,
 			knownConcepts: conceptNamesForPrompt(), style: teachingStyle)
-		let tree = Card(
-			title: result.title,
-			body: result.status,
-			kind: .free,
-			children: result.points.map { Card(title: $0.title, kind: $0.kind) },
-			concepts: result.concepts,
-			transcript: result.transcript,
-			problem: question.isEmpty ? result.title : question,
-			fallbackNote: result.fallbackNote
-		)
+		var tree = Card(title: "", kind: .free)
+		Self.apply(result, text: text, to: &tree)
 		insert(tree)
+		// 原始截圖留檔 —— 病歷卡要能看到「題目長什麼樣」；追問附圖也用同一套，key 是那張卡的 id
 		if let imageData { saveImage(imageData, for: tree.id) }
 		return tree.id
 	}
 
-	/// 貼上 / 分享進來的完整流程：概念清單 → 診斷 → 組題目 → 存檔，回傳新題 id。
-	/// 主 app 和分享浮層共用這一份，免得改流程時漏掉其中一邊。
-	func analyze(image: UIImage) async throws -> UUID {
-		// JPEG 只編碼一次，上傳和存檔共用同一份
-		guard let imageData = AIClient.jpeg(from: image) else { throw AIError.badImage }
-		let result = try await ai
-			.diagnose(imageJPEG: imageData, knownConcepts: conceptNamesForPrompt())
-		let topic = Card(
-			title: result.title,
-			body: result.status,
-			kind: .topic,
-			children: result.points.map { Card(title: $0.title, kind: $0.kind) },
-			concepts: result.concepts,
-			situation: result.parsedSituation,
-			transcript: result.transcript,
-			problem: result.problem.isEmpty ? nil : Card.stripProblemNumber(result.problem),
-			fallbackNote: result.fallbackNote
-		)
-		insert(topic)
-		// 原始截圖留檔 —— 病歷卡要能看到「題目長什麼樣」
-		try? imageData.write(to: imageFileURL(topic.id), options: .atomic)
-		return topic.id
+	/// 根問題改了重送：整棵重生（種類、開場句、點、概念都可能換），id 與圖不變
+	func reask(topicID: UUID, text: String) async throws {
+		let imageData = try? Data(contentsOf: imageFileURL(topicID))
+		let result = try await ai.ingest(
+			text: text, imageJPEG: imageData, hintConcept: nil,
+			knownConcepts: conceptNamesForPrompt(), style: teachingStyle)
+		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return }
+		Self.apply(result, text: text, to: &topics[index])
+		save()
+	}
+
+	/// 模型回覆寫進樹的根。ingest 新建與 reask 重生共用，兩邊的欄位對應不會走岔
+	private static func apply(_ result: AIClient.Ingested, text: String, to tree: inout Card) {
+		tree.title = result.title
+		tree.body = result.status
+		tree.kind = result.isProblem ? .topic : .free
+		tree.children = result.points.map { Card(title: $0.title, kind: $0.kind) }
+		tree.concepts = result.concepts
+		tree.situation = result.parsedSituation
+		tree.transcript = result.transcript
+		// 題目：清單預覽用的題目原文；提問：他打的那句（只貼圖沒打字就用模型取的名字）
+		tree.problem = result.isProblem
+			? (result.problem.isEmpty ? nil : Card.stripProblemNumber(result.problem))
+			: (text.isEmpty ? result.title : text)
+		tree.fallbackNote = result.fallbackNote
 	}
 }

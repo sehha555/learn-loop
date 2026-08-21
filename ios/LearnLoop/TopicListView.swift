@@ -4,9 +4,7 @@ import SwiftUI
 struct TopicListView: View {
 	@ObservedObject var store: CardStore
 	@State private var showingSettings = false
-	@State private var analyzing = false
 	@State private var path = NavigationPath()
-	@State private var errorMessage: String?
 	/// 段落收合。改 @State 畫面才會重畫；UserDefaults 只負責記住
 	@State private var collapsedGroups = Set(
 		UserDefaults.standard.stringArray(forKey: "collapsedTopicGroups") ?? [])
@@ -49,37 +47,16 @@ struct TopicListView: View {
 			.sheet(isPresented: $showingSettings) {
 				SettingsView(store: store)
 			}
-			.safeAreaInset(edge: .bottom) { pasteBar }
+			.safeAreaInset(edge: .bottom) {
+				// 貼題目截圖或直接打問題都從這裡進，答完直接跳進那棵樹
+				AskBar(store: store, placeholder: "貼題目截圖，或直接問…") { path.append($0) }
+					.padding(.horizontal)
+					.padding(.vertical, 8)
+					.background(.bar)
+			}
 			// 清單點進去、貼上分析完自動跳轉、概念相關的頁全走這一份共用路由
-			.conceptDestinations(store: store)
-			.alert("沒辦法處理", isPresented: .constant(errorMessage != nil)) {
-				Button("好") { errorMessage = nil }
-			} message: {
-				Text(errorMessage ?? "")
-			}
+			.conceptDestinations(store: store) { path.append($0) }
 		}
-	}
-
-	/// Slide Over 用法的入口：在 GoodNotes 截圖（或圈選複製）後，滑出來按這顆。
-	/// 用系統的 PasteButton 才不會每次都跳「允許貼上？」的確認框。
-	private var pasteBar: some View {
-		Group {
-			if analyzing {
-				HStack(spacing: 8) {
-					ProgressView()
-					Text("看你寫了什麼…").foregroundStyle(.secondary)
-				}
-			} else {
-				PasteButton(payloadType: PastedImage.self) { pasted in
-					guard let first = pasted.first else { return }
-					Task { @MainActor in await analyze(first.image) }
-				}
-				.buttonBorderShape(.capsule)
-			}
-		}
-		.frame(maxWidth: .infinity)
-		.padding(.vertical, 10)
-		.background(.bar)
 	}
 
 	/// 照「主概念」（模型列的第一個）分段，一題只出現一次；段落順序＝最新那題的順序。
@@ -118,22 +95,6 @@ struct TopicListView: View {
 		.buttonStyle(.plain)
 	}
 
-	@MainActor
-	private func analyze(_ image: UIImage) async {
-		guard store.hasProvider else {
-			showingSettings = true
-			return
-		}
-		analyzing = true
-		defer { analyzing = false }
-		do {
-			// 分析完直接跳進那棵樹，不用自己從清單找
-			path.append(try await store.analyze(image: image))
-		} catch {
-			errorMessage = error.localizedDescription
-		}
-	}
-
 	/// 預覽放題目原文（舊題沒抄就退回診斷句），底下一排概念 tag，主概念藍色
 	private func row(_ topic: Card) -> some View {
 		VStack(alignment: .leading, spacing: 5) {
@@ -170,7 +131,7 @@ struct TopicListView: View {
 		ContentUnavailableView {
 			Label("還沒有東西", systemImage: "tray")
 		} description: {
-			Text("在 GoodNotes 截圖或圈選複製，回到這裡按下面的「貼上」。")
+			Text("在 GoodNotes 截圖或圈選複製，回到這裡貼到下面那格；沒題目也可以直接打問題。")
 		}
 	}
 }
