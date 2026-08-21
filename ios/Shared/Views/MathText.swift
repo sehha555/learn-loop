@@ -104,6 +104,9 @@ struct MathText: View {
 		let normalized = latex
 			.replacingOccurrences(of: "\\dfrac", with: "\\frac")
 			.replacingOccurrences(of: "\\tfrac", with: "\\frac")
+			// \boxed 去框留內容；\Big[ 這類大括號變體去掉前綴留括號本身
+			.replacingOccurrences(of: "\\boxed{", with: "{")
+			.replacingOccurrences(of: "\\\\[Bb]igg?", with: "", options: .regularExpression)
 		var math = MathImage(
 			latex: normalized, fontSize: size, textColor: .black,
 			labelMode: .text, textAlignment: .left

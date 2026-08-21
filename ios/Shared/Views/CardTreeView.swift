@@ -298,50 +298,71 @@ struct CardTreeView: View {
 		}
 	}
 
-	/// 把 body 用換行切開，一行變一個帶編號的步驟 —— 讀起來像思緒一步步展開，
-	/// 不是塞成一整段。點某一步＝接下來的問題針對那一步問，模型就對著那步答，不用它猜你想問什麼
+	/// body 照空行切成區塊，一塊一個編號 —— 讀起來像思緒一步步展開，不是塞成一整段。
+	/// 點某一塊＝接下來的問題針對那一塊問，模型就對著它答，不用它猜你想問什麼。
+	/// 區塊裡每一行各自渲染：**粗體標題**、$$ 獨立式子、一般解說句
 	private func stepBody(_ text: String, of cardID: UUID) -> some View {
-		let lines =
-			text
-			.split(separator: "\n", omittingEmptySubsequences: true)
-			.map { $0.trimmingCharacters(in: .whitespaces) }
-			.filter { !$0.isEmpty }
-		// 「完整解法」口吻帶小標／獨立式子／條列記號，那就是講義體，不套步驟編號
-		let structured = lines.contains {
-			$0.hasPrefix("## ") || $0.hasPrefix("$$") || $0.hasPrefix("- ")
-		}
-		return VStack(alignment: .leading, spacing: 8) {
-			ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-				if structured {
-					structuredLine(line)
-				} else {
-					let focused = stepFocus?.cardID == cardID && stepFocus?.number == index + 1
-					Button {
-						if focused {
-							stepFocus = nil
-						} else {
-							stepFocus = (cardID, index + 1, line)
-							attachID = cardID
-						}
-					} label: {
-						HStack(alignment: .firstTextBaseline, spacing: 8) {
-							Text("\(index + 1)")
-								.font(.caption2.weight(.bold))
-								.foregroundStyle(focused ? .white : .secondary)
-								.frame(width: 16, height: 16)
-								.background(
-									focused ? Color.accentColor : Color(.tertiarySystemFill), in: Circle())
-							MathText(text: line, font: .callout, size: 16)
-								.foregroundStyle(.primary.opacity(0.85))
-								.multilineTextAlignment(.leading)
-						}
-						.frame(maxWidth: .infinity, alignment: .leading)
-						.contentShape(Rectangle())
+		let blocks = Self.blocks(of: text)
+		return VStack(alignment: .leading, spacing: 12) {
+			ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+				let focused = stepFocus?.cardID == cardID && stepFocus?.number == index + 1
+				Button {
+					if focused {
+						stepFocus = nil
+					} else {
+						stepFocus = (cardID, index + 1, Self.headline(of: block))
+						attachID = cardID
 					}
-					.buttonStyle(.plain)
+				} label: {
+					HStack(alignment: .firstTextBaseline, spacing: 8) {
+						Text("\(index + 1)")
+							.font(.caption2.weight(.bold))
+							.foregroundStyle(focused ? .white : .secondary)
+							.frame(width: 16, height: 16)
+							.background(
+								focused ? Color.accentColor : Color(.tertiarySystemFill), in: Circle())
+						VStack(alignment: .leading, spacing: 6) {
+							ForEach(Array(block.enumerated()), id: \.offset) { _, line in
+								structuredLine(line)
+							}
+						}
+					}
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.contentShape(Rectangle())
 				}
+				.buttonStyle(.plain)
 			}
 		}
+	}
+
+	/// 空行隔開的是一塊。沒有空行、也沒有版面記號的舊資料（一步一行那版）退回一行一塊
+	static func blocks(of text: String) -> [[String]] {
+		var blocks: [[String]] = []
+		var current: [String] = []
+		for raw in text.components(separatedBy: "\n") {
+			let line = raw.trimmingCharacters(in: .whitespaces)
+			if line.isEmpty {
+				if !current.isEmpty { blocks.append(current); current = [] }
+			} else {
+				current.append(line)
+			}
+		}
+		if !current.isEmpty { blocks.append(current) }
+		let structured = blocks.contains { block in
+			block.contains { $0.hasPrefix("**") || $0.hasPrefix("$$") || $0.hasPrefix("## ") || $0.hasPrefix("- ") }
+		}
+		if blocks.count == 1, !structured, blocks[0].count > 1 {
+			return blocks[0].map { [$0] }
+		}
+		return blocks
+	}
+
+	/// 針對某一塊發問時帶給模型的那句：拿標題行，去掉粗體／小標記號
+	private static func headline(of block: [String]) -> String {
+		let first = block.first ?? ""
+		var text = first.hasPrefix("## ") ? String(first.dropFirst(3)) : first
+		text = text.replacingOccurrences(of: "**", with: "")
+		return text.trimmingCharacters(in: .whitespaces)
 	}
 
 	/// 講義體的一行：## 小標、$$ 獨立式子、- 條列、關鍵是：結尾，其餘是一般句子
