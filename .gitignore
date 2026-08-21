@@ -5,3 +5,5 @@ ios/build/
 ios/DerivedData/
 .DS_Store
 .superpowers/
+__pycache__/
+dist/

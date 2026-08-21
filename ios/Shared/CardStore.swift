@@ -199,7 +199,7 @@ final class CardStore: ObservableObject {
 		let imageData = try? Data(contentsOf: imageFileURL(topicID))
 		let result = try await ai.ask(
 			question: question, imageJPEG: imageData,
-			knownConcepts: conceptNamesForPrompt(limit: 50), style: teachingStyle)
+			knownConcepts: conceptNamesForPrompt(), style: teachingStyle)
 		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return }
 		var tree = topics[index]
 		tree.title = result.title
@@ -220,14 +220,6 @@ final class CardStore: ObservableObject {
 		save()
 	}
 
-	/// 找出某個節點所在的題目與路徑，追問時當脈絡送給模型
-	func context(for cardID: UUID) -> (topic: Card, path: [String])? {
-		for topic in topics {
-			if let path = topic.path(to: cardID) { return (topic, path) }
-		}
-		return nil
-	}
-
 	func delete(topicID: UUID) {
 		topics.removeAll { $0.id == topicID }
 		try? FileManager.default.removeItem(at: imageFileURL(topicID))
@@ -242,7 +234,8 @@ final class CardStore: ObservableObject {
 	/// 回頭再碰時模型重新命名、計數從頭來，紅字永遠不會出現。
 	/// 所以卡過的概念佔前 60% 名額（同分最近優先），剩的名額才給最近出現的。
 	/// 只送名字不送次數 —— 送次數會讓模型往高頻概念靠，那是不想要的偏誤。
-	func conceptNamesForPrompt(limit: Int) -> [String] {
+	func conceptNamesForPrompt() -> [String] {
+		let limit = 50
 		let stats = conceptStats()
 		// byTime 的位置就是新舊，enumerated 的 offset 拿來當同分 tie-break
 		let byStuck = stats.byTime.enumerated()
@@ -400,7 +393,7 @@ final class CardStore: ObservableObject {
 		}
 		let result = try await ai.ask(
 			question: question, imageJPEG: imageData,
-			knownConcepts: conceptNamesForPrompt(limit: 50), style: teachingStyle)
+			knownConcepts: conceptNamesForPrompt(), style: teachingStyle)
 		let tree = Card(
 			title: result.title,
 			body: result.status,
@@ -422,7 +415,7 @@ final class CardStore: ObservableObject {
 		// JPEG 只編碼一次，上傳和存檔共用同一份
 		guard let imageData = AIClient.jpeg(from: image) else { throw AIError.badImage }
 		let result = try await ai
-			.diagnose(imageJPEG: imageData, knownConcepts: conceptNamesForPrompt(limit: 50))
+			.diagnose(imageJPEG: imageData, knownConcepts: conceptNamesForPrompt())
 		let topic = Card(
 			title: result.title,
 			body: result.status,

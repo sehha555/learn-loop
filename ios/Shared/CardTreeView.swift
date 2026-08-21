@@ -145,6 +145,9 @@ struct CardTreeView: View {
 			}
 		}
 		.onAppear { style = store.teachingStyle }
+		.sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+			editSheet
+		}
 		.alert("出錯了", isPresented: .constant(errorText != nil)) {
 			Button("好") { errorText = nil }
 		} message: {
@@ -270,9 +273,6 @@ struct CardTreeView: View {
 			Text("圖片抄錄（追問時模型看的是這份）")
 				.font(.caption)
 				.foregroundStyle(.secondary)
-		}
-		.sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
-			editSheet
 		}
 		.sheet(isPresented: $showingTranscript) {
 			NavigationStack {
@@ -619,7 +619,7 @@ struct CardTreeView: View {
 
 	private func conceptChoices(for topic: Card) -> [String] {
 		var names = topic.concepts
-		for name in store.conceptNamesForPrompt(limit: 50) where !names.contains(name) {
+		for name in store.conceptNamesForPrompt() where !names.contains(name) {
 			names.append(name)
 		}
 		return names
@@ -680,7 +680,7 @@ struct CardTreeView: View {
 	/// 這個 suspension 保證 start 那行把 Task 存進 running 之後，defer 才有機會清掉它
 	@MainActor
 	private func expand(_ card: Card, imageJPEG: Data? = nil) async {
-		guard let topic, let (_, path) = store.context(for: card.id) else { return }
+		guard let topic, let path = topic.path(to: card.id) else { return }
 		defer { running[card.id] = nil }
 		do {
 			let result = try await store.ai.expand(

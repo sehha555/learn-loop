@@ -1,9 +1,0 @@
-{
-	"id": "learn-loop",
-	"name": "Learn Loop",
-	"version": "0.0.1",
-	"minAppVersion": "1.4.0",
-	"description": "在 Excalidraw 畫布上按一鍵，AI 讀你的手寫並在旁邊長出解題節點",
-	"author": "sehha555",
-	"isDesktopOnly": false
-}
