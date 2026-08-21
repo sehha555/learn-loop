@@ -98,6 +98,8 @@ struct CardTreeView: View {
 	/// 每次展開完自動指到剛展開的節點，連問就串成一條線
 	@State private var attachID: UUID?
 	@State private var ownQuestion = ""
+	/// 追問附的圖。跟概念頁一樣：只在這一問送模型、存在這張卡的 id 下
+	@State private var ownImage: UIImage?
 	@State private var errorText: String?
 	@State private var showingTranscript = false
 	/// 口吻的本地鏡像 —— store 的 teachingStyle 直接寫 UserDefaults、不會觸發重繪
@@ -291,6 +293,14 @@ struct CardTreeView: View {
 
 			VStack(alignment: .leading, spacing: 6) {
 				title(card)
+				if card.kind == .custom, let image = store.image(for: card.id) {
+					Image(uiImage: image)
+						.resizable()
+						.scaledToFit()
+						.frame(maxHeight: 120)
+						.clipShape(RoundedRectangle(cornerRadius: 6))
+						.padding(.leading, 22)
+				}
 				if let body = card.body, !card.collapsed {
 					stepBody(body)
 						.padding(.leading, 22)
@@ -493,23 +503,50 @@ struct CardTreeView: View {
 		}
 	}
 
+	private var canAskOwn: Bool {
+		ownImage != nil || !ownQuestion.trimmingCharacters(in: .whitespaces).isEmpty
+	}
+
 	private func askField(_ topic: Card) -> some View {
-		HStack(spacing: 8) {
-			Text(Card.Kind.custom.mark)
-				.font(.caption2.weight(.bold))
-				.foregroundStyle(Card.Kind.custom.tint)
-				.frame(width: 14)
-			TextField(
-				topic.kind == .note ? "問這個概念…" : (attachID == nil ? "我想問別的…" : "接著問…"),
-				text: $ownQuestion
-			)
-				.font(.subheadline)
-				.submitLabel(.go)
-				.onSubmit { askOwn(in: topic.id) }
-			if !ownQuestion.trimmingCharacters(in: .whitespaces).isEmpty {
-				Button("問") { askOwn(in: topic.id) }
-					.font(.subheadline.weight(.semibold))
-					.buttonStyle(.borderless)
+		VStack(alignment: .leading, spacing: 6) {
+			if let ownImage {
+				HStack(spacing: 8) {
+					Image(uiImage: ownImage)
+						.resizable()
+						.scaledToFit()
+						.frame(height: 56)
+						.clipShape(RoundedRectangle(cornerRadius: 6))
+					Button("移除圖片", systemImage: "xmark.circle.fill") { self.ownImage = nil }
+						.labelStyle(.iconOnly)
+						.buttonStyle(.borderless)
+						.foregroundStyle(.secondary)
+				}
+			}
+			HStack(spacing: 8) {
+				Text(Card.Kind.custom.mark)
+					.font(.caption2.weight(.bold))
+					.foregroundStyle(Card.Kind.custom.tint)
+					.frame(width: 14)
+				PasteButton(payloadType: PastedImage.self) { pasted in
+					if let first = pasted.first { ownImage = first.image }
+				}
+				.labelStyle(.iconOnly)
+				.controlSize(.small)
+				.buttonBorderShape(.capsule)
+				TextField(
+					ownImage != nil
+						? "這張圖想問什麼？（可留空）"
+						: (topic.kind == .note ? "問這個概念…" : (attachID == nil ? "我想問別的…" : "接著問…")),
+					text: $ownQuestion
+				)
+					.font(.subheadline)
+					.submitLabel(.go)
+					.onSubmit { askOwn(in: topic.id) }
+				if canAskOwn {
+					Button("問") { askOwn(in: topic.id) }
+						.font(.subheadline.weight(.semibold))
+						.buttonStyle(.borderless)
+				}
 			}
 		}
 		.padding(.vertical, 7)
@@ -518,19 +555,23 @@ struct CardTreeView: View {
 	}
 
 	private func askOwn(in topicID: UUID) {
-		let text = ownQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !text.isEmpty,
-			let id = store.addCustom(topicID: topicID, parentID: attachID, title: text)
-		else { return }
+		let typed = ownQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard canAskOwn else { return }
+		let imageData = ownImage.flatMap(AIClient.jpeg(from:))
+		// 只貼圖沒打字，標題就寫明是在問圖
+		let text = typed.isEmpty ? "這張圖在講什麼？" : typed
+		guard let id = store.addCustom(topicID: topicID, parentID: attachID, title: text) else { return }
+		if let imageData { store.saveImage(imageData, for: id) }
 		ownQuestion = ""
+		ownImage = nil
 		guard let card = store.topics.first(where: { $0.id == topicID })?.find(id) else { return }
-		start(expanding: card)
+		start(expanding: card, imageJPEG: imageData)
 	}
 
 	// MARK: - 展開
 
-	private func start(expanding card: Card) {
-		running[card.id] = Task { await expand(card) }
+	private func start(expanding card: Card, imageJPEG: Data? = nil) {
+		running[card.id] = Task { await expand(card, imageJPEG: imageJPEG) }
 	}
 
 	/// 送給模型的「題目」欄：知識點樹與直接問的樹沒有題目，講清楚它是什麼
@@ -545,7 +586,7 @@ struct CardTreeView: View {
 	/// 標 MainActor 是為了讓 Task 的第一步一定是切回主執行緒 ——
 	/// 這個 suspension 保證 start 那行把 Task 存進 running 之後，defer 才有機會清掉它
 	@MainActor
-	private func expand(_ card: Card) async {
+	private func expand(_ card: Card, imageJPEG: Data? = nil) async {
 		guard let topic, let (_, path) = store.context(for: card.id) else { return }
 		defer { running[card.id] = nil }
 		do {
@@ -558,7 +599,8 @@ struct CardTreeView: View {
 				style: store.teachingStyle,
 				wantFollowUps: card.kind != .custom,
 				// 自己打的問題才判斷屬不屬於概念知識；知識點樹裡問的本來就是
-				conceptChoices: (card.kind == .custom && topic.kind != .note) ? topic.concepts : []
+				conceptChoices: (card.kind == .custom && topic.kind != .note) ? topic.concepts : [],
+				imageJPEG: imageJPEG
 			)
 			store.expand(
 				cardID: card.id, body: result.body, followUps: result.followUps,
