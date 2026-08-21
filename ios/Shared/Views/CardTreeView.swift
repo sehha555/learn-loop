@@ -14,6 +14,8 @@ struct CardTreeView: View {
 	/// 追問接點：自己打的問題掛在哪個節點下。nil = 題目根部（另起一條線）。
 	/// 每次展開完自動指到剛展開的節點，連問就串成一條線
 	@State private var attachID: UUID?
+	/// 針對某個節點的第幾步問。點步驟那行就設；接點換掉或送出後清掉
+	@State private var stepFocus: (cardID: UUID, number: Int, text: String)?
 	@State private var ownQuestion = ""
 	/// 追問附的圖。跟概念頁一樣：只在這一問送模型、存在這張卡的 id 下
 	@State private var ownImage: UIImage?
@@ -241,7 +243,7 @@ struct CardTreeView: View {
 						.padding(.leading, 22)
 				}
 				if let body = card.body, !card.collapsed {
-					stepBody(body)
+					stepBody(body, of: card.id)
 						.padding(.leading, 22)
 						.padding(.trailing, 4)
 					if let note = card.fallbackNote {
@@ -292,8 +294,8 @@ struct CardTreeView: View {
 	}
 
 	/// 把 body 用換行切開，一行變一個帶編號的步驟 —— 讀起來像思緒一步步展開，
-	/// 不是塞成一整段。
-	private func stepBody(_ text: String) -> some View {
+	/// 不是塞成一整段。點某一步＝接下來的問題針對那一步問，模型就對著那步答，不用它猜你想問什麼
+	private func stepBody(_ text: String, of cardID: UUID) -> some View {
 		let lines =
 			text
 			.split(separator: "\n", omittingEmptySubsequences: true)
@@ -308,15 +310,30 @@ struct CardTreeView: View {
 				if structured {
 					structuredLine(line)
 				} else {
-					HStack(alignment: .firstTextBaseline, spacing: 8) {
-						Text("\(index + 1)")
-							.font(.caption2.weight(.bold))
-							.foregroundStyle(.secondary)
-							.frame(width: 16, height: 16)
-							.background(Color(.tertiarySystemFill), in: Circle())
-						MathText(text: line, font: .callout, size: 16)
-							.foregroundStyle(.primary.opacity(0.85))
+					let focused = stepFocus?.cardID == cardID && stepFocus?.number == index + 1
+					Button {
+						if focused {
+							stepFocus = nil
+						} else {
+							stepFocus = (cardID, index + 1, line)
+							attachID = cardID
+						}
+					} label: {
+						HStack(alignment: .firstTextBaseline, spacing: 8) {
+							Text("\(index + 1)")
+								.font(.caption2.weight(.bold))
+								.foregroundStyle(focused ? .white : .secondary)
+								.frame(width: 16, height: 16)
+								.background(
+									focused ? Color.accentColor : Color(.tertiarySystemFill), in: Circle())
+							MathText(text: line, font: .callout, size: 16)
+								.foregroundStyle(.primary.opacity(0.85))
+								.multilineTextAlignment(.leading)
+						}
+						.frame(maxWidth: .infinity, alignment: .leading)
+						.contentShape(Rectangle())
 					}
+					.buttonStyle(.plain)
 				}
 			}
 		}
@@ -435,14 +452,19 @@ struct CardTreeView: View {
 		VStack(alignment: .leading, spacing: 6) {
 			if let attachID, let target = topic.find(attachID) {
 				HStack(spacing: 6) {
-					Text("接在：")
+					Text(stepFocus?.cardID == attachID ? "針對：" : "接在：")
 						.font(.caption2)
 						.foregroundStyle(.secondary)
 					Button {
 						self.attachID = nil
+						stepFocus = nil
 					} label: {
 						HStack(spacing: 4) {
-							Text(target.title).lineLimit(1)
+							if let stepFocus, stepFocus.cardID == attachID {
+								Text("第 \(stepFocus.number) 步 · \(stepFocus.text)").lineLimit(1)
+							} else {
+								Text(target.title).lineLimit(1)
+							}
 							Image(systemName: "xmark")
 						}
 						.font(.caption2)
@@ -460,8 +482,10 @@ struct CardTreeView: View {
 	private func askField(_ topic: Card) -> some View {
 		AskField(
 			text: $ownQuestion, image: $ownImage,
-			placeholder: topic.kind == .note
-				? "問這個概念…" : (attachID == nil ? "我想問別的…" : "接著問…"),
+			placeholder: stepFocus != nil && stepFocus?.cardID == attachID
+				? "這一步哪裡不懂…"
+				: (topic.kind == .note
+					? "問這個概念…" : (attachID == nil ? "我想問別的…" : "接著問…")),
 			running: false, onCancel: {}
 		) { askOwn(in: topic.id) }
 	}
@@ -471,11 +495,16 @@ struct CardTreeView: View {
 		guard ownImage != nil || !typed.isEmpty else { return }
 		let imageData = ownImage.flatMap(AIClient.jpeg(from:))
 		// 只貼圖沒打字，標題就寫明是在問圖
-		let text = typed.isEmpty ? "這張圖在講什麼？" : typed
+		var text = typed.isEmpty ? "這張圖在講什麼？" : typed
+		// 針對某一步問：把那步寫進標題，模型（看路徑）和之後翻的人都知道在問哪一步
+		if let stepFocus, stepFocus.cardID == attachID {
+			text = "第 \(stepFocus.number) 步「\(stepFocus.text.prefix(24))」：\(text)"
+		}
 		guard let id = store.addCustom(topicID: topicID, parentID: attachID, title: text) else { return }
 		if let imageData { store.saveImage(imageData, for: id) }
 		ownQuestion = ""
 		ownImage = nil
+		stepFocus = nil
 		guard let card = store.topics.first(where: { $0.id == topicID })?.find(id) else { return }
 		start(expanding: card, imageJPEG: imageData)
 	}
@@ -559,7 +588,6 @@ struct CardTreeView: View {
 				explained: topic.explainedLines(),
 				path: Array(path.dropFirst()), // 第一個是題目本身，模型已經知道
 				style: store.teachingStyle,
-				wantFollowUps: card.kind != .custom,
 				// 自己打的問題才判斷屬於哪個概念；清單是全部既有概念，這題的放前面
 				conceptChoices: card.kind == .custom ? conceptChoices(for: topic) : [],
 				imageJPEG: imageJPEG
@@ -567,8 +595,8 @@ struct CardTreeView: View {
 			// 知識點樹裡問的，判回同一個概念就不用再標
 			let concept = (topic.kind == .note && result.concept == topic.title) ? nil : result.concept
 			store.expand(
-				cardID: card.id, body: result.body, followUps: result.followUps,
-				noteConcept: concept, fallbackNote: result.fallbackNote)
+				cardID: card.id, body: result.body, noteConcept: concept,
+				fallbackNote: result.fallbackNote)
 			// 剛講完的東西就是下一個問題最可能接的地方
 			attachID = card.id
 		} catch {

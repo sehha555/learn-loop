@@ -111,17 +111,15 @@ final class CardStore: ObservableObject {
 		save()
 	}
 
-	/// 展開某個節點：填上內容，並把模型延伸出來的新問題掛成子節點；
+	/// 展開某個節點：填上內容。
 	/// noteConcept 是模型判斷「這問答屬於哪個概念的知識」，nil = 就是這題的事
 	func expand(
-		cardID: UUID, body: String, followUps: [AIClient.Point], noteConcept: String? = nil,
-		fallbackNote: String? = nil
+		cardID: UUID, body: String, noteConcept: String? = nil, fallbackNote: String? = nil
 	) {
 		mutate(cardID) { card in
 			card.body = body
 			card.noteConcept = noteConcept
 			card.fallbackNote = fallbackNote
-			card.children.append(contentsOf: followUps.map(\.card))
 		}
 	}
 

@@ -292,29 +292,20 @@ struct AIClient {
 
 	struct Expansion: Decodable, FallbackNoted {
 		let body: String
-		let followUps: [Point]
 		/// 自己打的問題才有：這問題屬於哪個概念的知識（不只關這題），nil = 就是這題的事
 		let concept: String?
 		var fallbackNote: String?
 
 		enum CodingKeys: String, CodingKey {
-			case body
-			case followUps = "follow_ups"
-			case concept
+			case body, concept
 		}
 	}
 
 	/// conceptChoices 非空時多要一個 concept 欄位：模型判斷這個問答屬於哪個概念。
 	/// 不用 enum 綁死 —— 清單只是對齊用，沒有貼切的要讓它取新名字
 	private static func expandSchema(conceptChoices: [String]) -> [String: Any] {
-		var properties: [String: Any] = [
-			"body": ["type": "string"],
-			"follow_ups": [
-				"type": "array",
-				"items": pointSchema(kinds: ["question", "supplement", "trap", "extend"]),
-			],
-		]
-		var required = ["body", "follow_ups"]
+		var properties: [String: Any] = ["body": ["type": "string"]]
+		var required = ["body"]
 		if !conceptChoices.isEmpty {
 			properties["concept"] = ["type": "string"]
 			required.append("concept")
@@ -326,13 +317,12 @@ struct AIClient {
 	///   - transcript: 診斷時抄下的圖片內容。nil = 這題是本欄位上線前存的，只能靠標題
 	///   - explained: 這棵樹已經講過的內容（路徑 → 內容），讓模型接著講而不是重講或矛盾
 	///   - path: 從題目到這個點的標題路徑，讓模型知道在回答哪一層
-	///   - style: 使用者選的教學口吻
-	///   - wantFollowUps: 自己打的問題不要再長出「你可能想問」的點 —— 他要的是答案
+	///   - style: 使用者選的講法
 	///   - conceptChoices: 這題的概念名。給了就要模型順便判斷這問答屬不屬於某個概念的知識
 	///   - imageJPEG: 問題附的圖（課本的圖、筆記的一段），只在這一問送，追問不再帶
 	func expand(
 		topic: String, diagnosis: String, transcript: String?, explained: [String],
-		path: [String], style: TeachingStyle, wantFollowUps: Bool,
+		path: [String], style: TeachingStyle,
 		conceptChoices: [String] = [], imageJPEG: Data? = nil
 	) async throws -> Expansion {
 		let conceptRule =
@@ -340,21 +330,13 @@ struct AIClient {
 			? ""
 			: """
 
-			6. concept：判斷他這個問題是「只有這題才會問」（代這個數字、這一行哪裡錯），
+			5. concept：判斷他這個問題是「只有這題才會問」（代這個數字、這一行哪裡錯），
 			   還是「換一題也會問、屬於概念本身」（什麼時候用、為什麼這樣設、公式怎麼來）。
 			   前者給「（這題專屬）」；後者回它屬於的概念名：他累積過的概念有
 			   \(conceptChoices.joined(separator: "、"))，
 			   有語意相同的務必原樣重用、一個字都不改；都不貼切才自己取一個
 			   （粒度像教科書小節，二到十個字，不要科目名或整章的大詞）。
 			"""
-		let followUpRule =
-			wantFollowUps
-			? """
-			follow_ups 是這段解釋之後新冒出來、他可能會想再點的點，0 到 3 個。
-			   每個有 kind（question / supplement / trap / extend）和 title。
-			   沒有就給空陣列，不要硬湊。
-			"""
-			: "follow_ups 給空陣列。"
 		let prompt = """
 		題目：\(topic)
 		圖片上的內容（抄錄）：
@@ -372,16 +354,14 @@ struct AIClient {
 
 		範圍規則：只回答跟這一題（或這份筆記）有關的內容。
 		如果路徑最後那個點跟學習內容無關 —— 問你是什麼模型、閒聊、
-		要你寫別的東西 —— body 只寫一行「這裡只回答跟這題有關的問題」，
-		follow_ups 給空陣列。
+		要你寫別的東西 —— body 只寫一行「這裡只回答跟這題有關的問題」。
 
 		規則：
 		1. \(style.bodyRule)
 		2. \(style.modeRule)
-		3. \(followUpRule)
-		4. 不要重複已經講過的東西；他問的如果指涉前面某一段（「第二步為什麼」「那個公式」），
-		   就對著那一段回答。
-		5. \(Self.formatRule)\(conceptRule)
+		3. 不要重複已經講過的東西；他問的如果指涉前面某一步（路徑裡寫「第 2 步「…」：」就是針對那一步），
+		   就對著那一步回答，不要從頭講。
+		4. \(Self.formatRule)\(conceptRule)
 		"""
 		let result: Expansion = try await call(
 			text: prompt,
@@ -393,9 +373,7 @@ struct AIClient {
 		let concept = result.concept
 			.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
 			.flatMap { ($0.isEmpty || $0 == "（這題專屬）") ? nil : $0 }
-		return Expansion(
-			body: result.body, followUps: result.followUps, concept: concept,
-			fallbackNote: result.fallbackNote)
+		return Expansion(body: result.body, concept: concept, fallbackNote: result.fallbackNote)
 	}
 
 	// MARK: - 概念分章
