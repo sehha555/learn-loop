@@ -58,13 +58,15 @@ struct ConceptPageView: View {
 	// MARK: - 各區塊
 
 	/// 概念名已經在導覽列上，這裡只放次數。
-	/// 卡過時兩個數字都給 ——「卡 3 次但出現 5 題」跟「卡 3 次只出現 3 題」是不同的事
+	/// 卡過時把證據攤開 ——「截圖看起來卡 2 次」跟「自己問了 2 次」可信度不同，不混成一個數字
 	@ViewBuilder
 	private var header: some View {
-		let appearances = store.appearanceCount(name)
-		let stuck = store.stuckCount(name)
-		if store.isRepeated(stuckCount: stuck) {
-			Text("卡過 \(stuck) 次 · 出現在 \(appearances) 題裡")
+		let stats = store.conceptStats()
+		let appearances = stats.appearances[name] ?? 0
+		let stuck = stats.stuck[name] ?? 0
+		let asked = stats.asked[name] ?? 0
+		if store.isRepeated(trouble: stuck + asked) {
+			Text("\(Self.troubleLabel(stuck: stuck, asked: asked)) · 出現在 \(appearances) 題裡")
 				.font(.footnote.weight(.semibold))
 				.foregroundStyle(.red)
 		} else {
@@ -72,6 +74,14 @@ struct ConceptPageView: View {
 				.font(.footnote)
 				.foregroundStyle(.secondary)
 		}
+	}
+
+	/// 「卡過 2 次 · 問過 3 次」—— 哪邊是 0 就不寫
+	static func troubleLabel(stuck: Int, asked: Int) -> String {
+		var parts: [String] = []
+		if stuck > 0 { parts.append("卡過 \(stuck) 次") }
+		if asked > 0 { parts.append("問過 \(asked) 次") }
+		return parts.joined(separator: " · ")
 	}
 
 	// MARK: - 模型整理頁

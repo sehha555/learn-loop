@@ -212,12 +212,13 @@ struct CardTreeView: View {
 		}
 	}
 
-	/// 「你之前也卡過」那行紅字。數的是真的卡住的次數（app 算的，模型只給概念名），
+	/// 「你之前也卡過」那行紅字。數的是卡住的次數（截圖判的＋自己問的，app 算的，模型只給概念名），
 	/// 「算不算卡過」的門檻問 store，這裡不自己比大小。
 	private func recallText(_ concepts: [String]) -> String? {
+		let stats = store.conceptStats()
 		let repeated = concepts.compactMap { name -> String? in
-			let count = store.stuckCount(name)
-			return store.isRepeated(stuckCount: count) ? "「\(name)」第 \(count) 次卡了" : nil
+			let count = stats.trouble(name)
+			return store.isRepeated(trouble: count) ? "「\(name)」第 \(count) 次卡了" : nil
 		}
 		guard !repeated.isEmpty else { return nil }
 		return repeated.joined(separator: "、")
