@@ -11,6 +11,8 @@ final class CardStore: ObservableObject {
 	static let appGroupID = "group.com.sehha555.learnloop"
 
 	@Published internal(set) var topics: [Card] = []
+	/// 概念 → 模型整理頁。存 wiki.json，跟 topics.json 分開 —— 它是衍生物，樹才是原始資料
+	@Published internal(set) var wiki: [String: WikiPage] = [:]
 
 	/// 真正的題目（不含概念知識點、直接問的那些樹）。清單、統計、病歷卡的題目紀錄都看這個
 	var problems: [Card] { topics.filter { $0.kind != .note && $0.kind != .free } }
@@ -24,6 +26,7 @@ final class CardStore: ObservableObject {
 	let isShared: Bool
 
 	private let fileURL: URL
+	let wikiURL: URL
 	let imagesDir: URL
 	private let defaults: UserDefaults
 
@@ -34,11 +37,13 @@ final class CardStore: ObservableObject {
 		let dir = shared ?? FileManager.default.urls(
 			for: .documentDirectory, in: .userDomainMask)[0]
 		fileURL = dir.appendingPathComponent("topics.json")
+		wikiURL = dir.appendingPathComponent("wiki.json")
 		imagesDir = dir.appendingPathComponent("images", isDirectory: true)
 		try? FileManager.default.createDirectory(
 			at: imagesDir, withIntermediateDirectories: true)
 		defaults = UserDefaults(suiteName: Self.appGroupID) ?? .standard
 		load()
+		loadWiki()
 	}
 
 	// MARK: - API key

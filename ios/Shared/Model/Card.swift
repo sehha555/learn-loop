@@ -24,6 +24,15 @@ struct Card: Identifiable, Codable, Hashable {
 		case stuck   // 寫到一半停住
 		case done    // 寫完了
 		case blank   // 只有題目還沒動筆
+
+		/// 餵回模型或顯示用的白話
+		var label: String {
+			switch self {
+			case .stuck: "寫到一半卡住"
+			case .done: "寫完了"
+			case .blank: "只有題目、還沒動筆"
+			}
+		}
 	}
 
 	let id: UUID

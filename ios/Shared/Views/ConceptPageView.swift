@@ -36,11 +36,15 @@ struct ConceptPageView: View {
 	@State private var zoomTopic: Card?
 	/// 展開看紀錄的題目
 	@State private var expanded: Set<UUID> = []
+	/// 整理頁進行中的請求。存 Task 是為了讓「取消」真的能中斷
+	@State private var compiling: Task<Void, Never>?
+	@State private var errorText: String?
 
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 20) {
 				header
+				wikiSection
 				notesSection
 				questionsSection
 				relatedSection
@@ -48,6 +52,7 @@ struct ConceptPageView: View {
 			}
 			.padding()
 		}
+		.errorAlert($errorText)
 		.navigationTitle(name)
 		.navigationBarTitleDisplayMode(.inline)
 		.task(id: name) {
@@ -81,6 +86,92 @@ struct ConceptPageView: View {
 			Text("出現在 \(appearances) 題裡")
 				.font(.footnote)
 				.foregroundStyle(.secondary)
+		}
+	}
+
+	// MARK: - 模型整理頁
+
+	/// 概念頁的成品區：模型讀底下所有材料寫的三塊。按了才重寫，新材料進來只標「多了 N 筆」
+	@ViewBuilder
+	private var wikiSection: some View {
+		let page = store.wiki[name]
+		let newCount = store.wikiNewCount(for: name)
+		VStack(alignment: .leading, spacing: 10) {
+			HStack {
+				Text("整理")
+					.font(.caption2)
+					.foregroundStyle(.tertiary)
+				Spacer()
+				if compiling != nil {
+					ProgressView().controlSize(.small)
+					Button("取消") { compiling?.cancel() }
+						.font(.caption)
+						.buttonStyle(.borderless)
+				} else if page == nil {
+					Button("整理這個概念（\(newCount) 筆材料）", systemImage: "wand.and.stars") { compile() }
+						.font(.caption.weight(.semibold))
+						.buttonStyle(.borderless)
+						.disabled(newCount == 0)
+				} else if newCount > 0 {
+					Button("重新整理（多了 \(newCount) 筆）", systemImage: "arrow.clockwise") { compile() }
+						.font(.caption.weight(.semibold))
+						.buttonStyle(.borderless)
+				} else {
+					Button("重新整理", systemImage: "arrow.clockwise") { compile() }
+						.font(.caption)
+						.buttonStyle(.borderless)
+						.foregroundStyle(.secondary)
+				}
+			}
+			if let page {
+				wikiBlock("是什麼", lines: [page.what])
+				wikiBlock("你卡過的地方", lines: page.stuck.components(separatedBy: "\n"))
+				wikiBlock("還沒補的", lines: page.gaps.components(separatedBy: "\n"))
+				if let note = page.fallbackNote {
+					Label(note, systemImage: "icloud.and.arrow.down")
+						.font(.caption2)
+						.foregroundStyle(.orange)
+				}
+				Text("整理於 \(page.compiledAt.formatted(date: .abbreviated, time: .shortened)) · 讀了 \(page.materialCount) 筆材料")
+					.font(.caption2)
+					.foregroundStyle(.tertiary)
+			} else if newCount == 0 {
+				Text("還沒有材料。貼一題或問一個問題，歸到這個概念後就能整理。")
+					.font(.caption)
+					.foregroundStyle(.secondary)
+			}
+		}
+		.padding(12)
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+	}
+
+	private func wikiBlock(_ title: String, lines: [String]) -> some View {
+		VStack(alignment: .leading, spacing: 4) {
+			Text(title)
+				.font(.caption.weight(.semibold))
+				.foregroundStyle(.secondary)
+			ForEach(Array(lines.filter { !$0.isEmpty }.enumerated()), id: \.offset) { _, line in
+				MathText(text: line, font: .callout, size: 15)
+					.foregroundStyle(.primary.opacity(0.9))
+			}
+		}
+	}
+
+	private func compile() {
+		guard compiling == nil else { return }
+		guard store.hasProvider else {
+			errorText = AIError.noAPIKey.localizedDescription
+			return
+		}
+		compiling = Task { @MainActor in
+			defer { compiling = nil }
+			do {
+				try await store.compileWiki(for: name)
+			} catch {
+				guard !AIClient.isCancellation(error) else { return }
+				errorText = error.localizedDescription
+			}
 		}
 	}
 
