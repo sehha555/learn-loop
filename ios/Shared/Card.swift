@@ -52,6 +52,8 @@ struct Card: Identifiable, Codable, Hashable {
 	/// 這個問答不只關這一題、屬於某個概念的知識 —— 模型答題時順便判斷，判錯可手動改。
 	/// 節點留在原樹不搬，概念的知識點頁同時列出它
 	var noteConcept: String?
+	/// 這個節點的內容是中繼站失敗後退回雲端答的（含原因）。nil = 正常路徑
+	var fallbackNote: String?
 
 	init(
 		id: UUID = UUID(),
@@ -65,7 +67,8 @@ struct Card: Identifiable, Codable, Hashable {
 		transcript: String? = nil,
 		problem: String? = nil,
 		collapsed: Bool = false,
-		noteConcept: String? = nil
+		noteConcept: String? = nil,
+		fallbackNote: String? = nil
 	) {
 		self.id = id
 		self.title = title
@@ -79,6 +82,7 @@ struct Card: Identifiable, Codable, Hashable {
 		self.problem = problem
 		self.collapsed = collapsed
 		self.noteConcept = noteConcept
+		self.fallbackNote = fallbackNote
 	}
 
 	/// 手寫的 init —— kind 是後來才加的欄位，舊存檔沒有它。
@@ -97,6 +101,7 @@ struct Card: Identifiable, Codable, Hashable {
 		problem = try container.decodeIfPresent(String.self, forKey: .problem)
 		collapsed = try container.decodeIfPresent(Bool.self, forKey: .collapsed) ?? false
 		noteConcept = try container.decodeIfPresent(String.self, forKey: .noteConcept)
+		fallbackNote = try container.decodeIfPresent(String.self, forKey: .fallbackNote)
 	}
 
 	var isExpanded: Bool { body != nil }

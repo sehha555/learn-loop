@@ -180,6 +180,9 @@ struct CardTreeView: View {
 			if let body = topic.body {
 				MathText(text: body, font: .headline, size: 17)
 			}
+			if let note = topic.fallbackNote {
+				fallbackLabel(note)
+			}
 			if let transcript = topic.transcript {
 				transcriptBlock(transcript, topicID: topic.id)
 			}
@@ -305,6 +308,10 @@ struct CardTreeView: View {
 					stepBody(body)
 						.padding(.leading, 22)
 						.padding(.trailing, 4)
+					if let note = card.fallbackNote {
+						fallbackLabel(note)
+							.padding(.leading, 22)
+					}
 					if card.kind == .custom, let topic, topic.kind != .note,
 						!topic.concepts.isEmpty {
 						moveToNoteMenu(card, concepts: topic.concepts)
@@ -314,6 +321,13 @@ struct CardTreeView: View {
 			}
 		}
 		.padding(.vertical, 3)
+	}
+
+	/// 中繼站失敗退回雲端的提示 —— 不再靜默，答案風格不同或沒看到圖時知道是為什麼
+	private func fallbackLabel(_ note: String) -> some View {
+		Label(note, systemImage: "icloud.and.arrow.down")
+			.font(.caption2)
+			.foregroundStyle(.orange)
 	}
 
 	/// 模型答題時順便判斷這問答是不是概念層的知識；這裡顯示判斷結果，判錯可以改。
@@ -604,7 +618,7 @@ struct CardTreeView: View {
 			)
 			store.expand(
 				cardID: card.id, body: result.body, followUps: result.followUps,
-				noteConcept: result.concept)
+				noteConcept: result.concept, fallbackNote: result.fallbackNote)
 			// 剛講完的東西就是下一個問題最可能接的地方
 			attachID = card.id
 		} catch {

@@ -1,8 +1,25 @@
 import SwiftUI
 
+/// 只為了接 background URLSession 的喚醒：app 被砍掉後系統把結果送回來時會走這裡
+final class AppDelegate: NSObject, UIApplicationDelegate {
+	func application(
+		_ application: UIApplication,
+		handleEventsForBackgroundURLSession identifier: String,
+		completionHandler: @escaping () -> Void
+	) {
+		AITransport.background.backgroundCompletion = completionHandler
+	}
+}
+
 @main
 struct LearnLoopApp: App {
+	@UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 	@StateObject private var store = CardStore()
+
+	init() {
+		// 主 app 的模型請求交給系統背景跑 —— 送出後切回 GoodNotes 也不會斷
+		AIClient.transport = .background
+	}
 
 	var body: some Scene {
 		WindowGroup {

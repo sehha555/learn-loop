@@ -114,6 +114,8 @@ struct AIClient {
 	let apiKey: String
 	/// Mac 中繼站（走 Claude Code 訂閱）。有設就優先走它，失敗自動退回雲端 API
 	var relay: URL? = nil
+	/// 送請求的管道。主 app 啟動時換成 background（見 AITransport），分享浮層用預設
+	nonisolated(unsafe) static var transport: AITransport = .foreground
 
 	enum Provider {
 		case google
@@ -138,9 +140,16 @@ struct AIClient {
 		let title: String
 	}
 
+	/// 模型回覆都多帶一句：這次是不是中繼站失敗退回雲端、為什麼。
+	/// 之前是靜默退回，使用者看到 Gemini 的答案以為「模型沒看到圖」
+	protocol FallbackNoted {
+		var fallbackNote: String? { get set }
+	}
+
 	/// is_problem 只是 prompt 裡給模型的行為開關（題目才給解題步驟），
 	/// app 端用不到，所以不 decode 它。
-	struct Diagnosis: Decodable {
+	struct Diagnosis: Decodable, FallbackNoted {
+		var fallbackNote: String?
 		let title: String
 		/// stuck / done / blank —— 存檔後當「卡過幾次」的依據。
 		/// 維持 String 不用 enum：模型（尤其走中繼站那條字串解析的路）可能回超出
@@ -277,7 +286,8 @@ struct AIClient {
 
 	// MARK: - 補抄題目原文（舊題沒有這欄）
 
-	private struct Extracted: Decodable {
+	private struct Extracted: Decodable, FallbackNoted {
+		var fallbackNote: String?
 		let problem: String
 	}
 
@@ -304,7 +314,8 @@ struct AIClient {
 
 	// MARK: - 直接問（沒貼題目）
 
-	struct Asked: Decodable {
+	struct Asked: Decodable, FallbackNoted {
+		var fallbackNote: String?
 		let title: String
 		let status: String
 		let concepts: [String]
@@ -407,11 +418,12 @@ struct AIClient {
 
 	// MARK: - 展開一個點
 
-	struct Expansion: Decodable {
+	struct Expansion: Decodable, FallbackNoted {
 		let body: String
 		let followUps: [Point]
 		/// 自己打的問題才有：這問題屬於哪個概念的知識（不只關這題），nil = 就是這題的事
 		let concept: String?
+		var fallbackNote: String?
 
 		enum CodingKeys: String, CodingKey {
 			case body
@@ -503,17 +515,20 @@ struct AIClient {
 		)
 		// 哨兵值與清單外的名字一律當「這題專屬」
 		let concept = result.concept.flatMap { conceptChoices.contains($0) ? $0 : nil }
-		return Expansion(body: result.body, followUps: result.followUps, concept: concept)
+		return Expansion(
+			body: result.body, followUps: result.followUps, concept: concept,
+			fallbackNote: result.fallbackNote)
 	}
 
 	// MARK: - 送出
 
-	private func call<T: Decodable>(
+	private func call<T: Decodable & FallbackNoted>(
 		text: String,
 		imageBase64: String?,
 		toolName: String,
 		schema: [String: Any]
 	) async throws -> T {
+		var fallbackNote: String?
 		if let relay {
 			do {
 				return try await callRelay(
@@ -521,8 +536,9 @@ struct AIClient {
 			} catch {
 				// 使用者自己按掉的話不要換路再打一次
 				try Task.checkCancellation()
-				// Mac 睡著或連不上：有 key 就靜默退回雲端，讀書不中斷
+				// Mac 睡著或連不上：有 key 就退回雲端，讀書不中斷 —— 但要讓人看得到
 				if apiKey.isEmpty { throw error }
+				fallbackNote = "Mac 中繼站沒接上（\(Self.describe(error))），這次由雲端回答"
 			}
 		}
 		guard !apiKey.isEmpty else { throw AIError.noAPIKey }
@@ -537,12 +553,21 @@ struct AIClient {
 			 Self.extractAnthropic)
 		}
 
-		let (data, response) = try await URLSession.shared.data(for: request)
+		let (data, response) = try await Self.transport.send(request)
 		if let http = response as? HTTPURLResponse, http.statusCode != 200 {
 			throw AIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
 		}
 		let payload = try extract(data)
-		return try JSONDecoder().decode(T.self, from: payload)
+		var result = try JSONDecoder().decode(T.self, from: payload)
+		result.fallbackNote = fallbackNote
+		return result
+	}
+
+	/// 退回原因的短描述：URLError 給錯誤碼（-1005 連線中斷、-1001 逾時…），其他給訊息
+	private static func describe(_ error: Error) -> String {
+		if let urlError = error as? URLError { return "錯誤 \(urlError.code.rawValue)" }
+		if case let AIError.http(code, _) = error { return "HTTP \(code)" }
+		return error.localizedDescription
 	}
 
 	// MARK: - Mac 中繼站
@@ -565,7 +590,7 @@ struct AIClient {
 		if let imageBase64 { body["image_base64"] = imageBase64 }
 		request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-		let (data, response) = try await URLSession.shared.data(for: request)
+		let (data, response) = try await Self.transport.send(request)
 		if let http = response as? HTTPURLResponse, http.statusCode != 200 {
 			throw AIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
 		}

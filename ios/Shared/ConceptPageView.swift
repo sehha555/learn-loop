@@ -274,7 +274,9 @@ struct ConceptPageView: View {
 					wantFollowUps: false,
 					imageJPEG: imageData
 				)
-				store.expand(cardID: id, body: result.body, followUps: result.followUps)
+				store.expand(
+					cardID: id, body: result.body, followUps: result.followUps,
+					fallbackNote: result.fallbackNote)
 			} catch {
 				guard !AIClient.isCancellation(error) else { return }
 				errorText = error.localizedDescription

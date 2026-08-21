@@ -105,12 +105,14 @@ final class CardStore: ObservableObject {
 	/// 展開某個節點：填上內容，並把模型延伸出來的新問題掛成子節點；
 	/// noteConcept 是模型判斷「這問答屬於哪個概念的知識」，nil = 就是這題的事
 	func expand(
-		cardID: UUID, body: String, followUps: [AIClient.Point], noteConcept: String? = nil
+		cardID: UUID, body: String, followUps: [AIClient.Point], noteConcept: String? = nil,
+		fallbackNote: String? = nil
 	) {
 		for index in topics.indices {
 			let hit = topics[index].update(id: cardID) { card in
 				card.body = body
 				card.noteConcept = noteConcept
+				card.fallbackNote = fallbackNote
 				card.children.append(
 					contentsOf: followUps.map { Card(title: $0.title, kind: $0.kind) })
 			}
@@ -368,7 +370,8 @@ final class CardStore: ObservableObject {
 			children: result.points.map { Card(title: $0.title, kind: $0.kind) },
 			concepts: result.concepts,
 			transcript: result.transcript,
-			problem: question.isEmpty ? result.title : question
+			problem: question.isEmpty ? result.title : question,
+			fallbackNote: result.fallbackNote
 		)
 		insert(tree)
 		if let imageData { saveImage(imageData, for: tree.id) }
@@ -390,7 +393,8 @@ final class CardStore: ObservableObject {
 			concepts: result.concepts,
 			situation: result.parsedSituation,
 			transcript: result.transcript,
-			problem: result.problem.isEmpty ? nil : Card.stripProblemNumber(result.problem)
+			problem: result.problem.isEmpty ? nil : Card.stripProblemNumber(result.problem),
+			fallbackNote: result.fallbackNote
 		)
 		insert(topic)
 		// 原始截圖留檔 —— 病歷卡要能看到「題目長什麼樣」
