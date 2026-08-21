@@ -105,7 +105,8 @@ struct CardTreeView: View {
 			if let transcript = topic.transcript {
 				transcriptBlock(transcript, topicID: topic.id)
 			}
-			if topic.kind == .free, let question = topic.problem {
+			// 你打字送進來的樹（題目或提問）都能改那句重生；舊的直接問樹只存在 problem 欄
+			if let question = topic.asked ?? (topic.kind == .free ? topic.problem : nil) {
 				HStack(spacing: 8) {
 					Text("你問：\(question)")
 						.font(.caption)
@@ -540,7 +541,7 @@ struct CardTreeView: View {
 		switch topic.kind {
 		case .note: "概念「\(topic.title)」的知識問題，不針對特定題目"
 		case .free: "他直接問的問題（沒有特定題目）：\(topic.problem ?? topic.title)"
-		default: topic.title
+		default: topic.asked.map { "\(topic.title)（他貼題目時說：\($0)）" } ?? topic.title
 		}
 	}
 

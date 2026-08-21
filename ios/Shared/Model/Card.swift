@@ -54,6 +54,8 @@ struct Card: Identifiable, Codable, Hashable {
 	var noteConcept: String?
 	/// 這個節點的內容是中繼站失敗後退回雲端答的（含原因）。nil = 正常路徑
 	var fallbackNote: String?
+	/// 他送進來時打的字（只貼圖沒打字就 nil）。只有樹根有；改問題重送時顯示、重生時重送
+	var asked: String?
 
 	init(
 		id: UUID = UUID(),
@@ -68,7 +70,8 @@ struct Card: Identifiable, Codable, Hashable {
 		problem: String? = nil,
 		collapsed: Bool = false,
 		noteConcept: String? = nil,
-		fallbackNote: String? = nil
+		fallbackNote: String? = nil,
+		asked: String? = nil
 	) {
 		self.id = id
 		self.title = title
@@ -83,6 +86,7 @@ struct Card: Identifiable, Codable, Hashable {
 		self.collapsed = collapsed
 		self.noteConcept = noteConcept
 		self.fallbackNote = fallbackNote
+		self.asked = asked
 	}
 
 	/// 手寫的 init —— kind 是後來才加的欄位，舊存檔沒有它。
@@ -102,6 +106,7 @@ struct Card: Identifiable, Codable, Hashable {
 		collapsed = try container.decodeIfPresent(Bool.self, forKey: .collapsed) ?? false
 		noteConcept = try container.decodeIfPresent(String.self, forKey: .noteConcept)
 		fallbackNote = try container.decodeIfPresent(String.self, forKey: .fallbackNote)
+		asked = try container.decodeIfPresent(String.self, forKey: .asked)
 	}
 
 	var isExpanded: Bool { body != nil }

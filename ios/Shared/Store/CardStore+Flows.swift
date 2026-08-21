@@ -86,5 +86,6 @@ extension CardStore {
 			? (result.problem.isEmpty ? nil : Card.stripProblemNumber(result.problem))
 			: (text.isEmpty ? result.title : text)
 		tree.fallbackNote = result.fallbackNote
+		tree.asked = text.isEmpty ? nil : text
 	}
 }
