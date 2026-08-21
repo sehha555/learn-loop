@@ -146,6 +146,11 @@ extension Card {
 		stripped = stripped.replacingOccurrences(
 			of: #"[\s=＝?？]+\$\s*$"#, with: "$", options: .regularExpression)
 		stripped = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
+		// 模型偶爾整句是 LaTeX 卻忘了包 $（「\int_0^1 … dx」）——沒包的 MathText 當純文字顯示原始碼
+		if !stripped.contains("$"), stripped.contains("\\"),
+		   stripped.range(of: #"\p{Han}"#, options: .regularExpression) == nil {
+			stripped = "$" + stripped + "$"
+		}
 		return stripped.isEmpty ? text : stripped
 	}
 
