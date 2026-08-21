@@ -432,7 +432,8 @@ struct AIClient {
 		}
 	}
 
-	/// conceptChoices 非空時多要一個 concept 欄位：模型判斷這個問答是不是概念層的
+	/// conceptChoices 非空時多要一個 concept 欄位：模型判斷這個問答屬於哪個概念。
+	/// 不用 enum 綁死 —— 清單只是對齊用，沒有貼切的要讓它取新名字
 	private static func expandSchema(conceptChoices: [String]) -> [String: Any] {
 		var properties: [String: Any] = [
 			"body": ["type": "string"],
@@ -443,7 +444,7 @@ struct AIClient {
 		]
 		var required = ["body", "follow_ups"]
 		if !conceptChoices.isEmpty {
-			properties["concept"] = ["type": "string", "enum": conceptChoices + ["（這題專屬）"]]
+			properties["concept"] = ["type": "string"]
 			required.append("concept")
 		}
 		return ["type": "object", "properties": properties, "required": required]
@@ -469,7 +470,10 @@ struct AIClient {
 
 			6. concept：判斷他這個問題是「只有這題才會問」（代這個數字、這一行哪裡錯），
 			   還是「換一題也會問、屬於概念本身」（什麼時候用、為什麼這樣設、公式怎麼來）。
-			   前者給「（這題專屬）」；後者從清單裡挑最貼的概念名原樣回。
+			   前者給「（這題專屬）」；後者回它屬於的概念名：他累積過的概念有
+			   \(conceptChoices.joined(separator: "、"))，
+			   有語意相同的務必原樣重用、一個字都不改；都不貼切才自己取一個
+			   （粒度像教科書小節，二到十個字，不要科目名或整章的大詞）。
 			"""
 		let followUpRule =
 			wantFollowUps
@@ -513,8 +517,10 @@ struct AIClient {
 			toolName: "record_expansion",
 			schema: Self.expandSchema(conceptChoices: conceptChoices)
 		)
-		// 哨兵值與清單外的名字一律當「這題專屬」
-		let concept = result.concept.flatMap { conceptChoices.contains($0) ? $0 : nil }
+		// 哨兵值當「這題專屬」；其他照收（清單外＝模型新取的概念名）
+		let concept = result.concept
+			.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+			.flatMap { ($0.isEmpty || $0 == "（這題專屬）") ? nil : $0 }
 		return Expansion(
 			body: result.body, followUps: result.followUps, concept: concept,
 			fallbackNote: result.fallbackNote)

@@ -105,6 +105,9 @@ struct CardTreeView: View {
 	/// 口吻的本地鏡像 —— store 的 teachingStyle 直接寫 UserDefaults、不會觸發重繪
 	@State private var style: TeachingStyle = .plain
 	@State private var transcriptDraft = ""
+	/// 正在改的問題：自己打的節點、或直接問的根（root = true）
+	@State private var editing: (cardID: UUID, root: Bool)?
+	@State private var editDraft = ""
 
 	private var topic: Card? { store.topics.first { $0.id == topicID } }
 
@@ -187,9 +190,25 @@ struct CardTreeView: View {
 				transcriptBlock(transcript, topicID: topic.id)
 			}
 			if topic.kind == .free, let question = topic.problem {
-				Text("你問：\(question)")
-					.font(.caption)
-					.foregroundStyle(.secondary)
+				HStack(spacing: 8) {
+					Text("你問：\(question)")
+						.font(.caption)
+						.foregroundStyle(.secondary)
+					if running[topic.id] != nil {
+						ProgressView().controlSize(.mini)
+						Button("取消") { running[topic.id]?.cancel() }
+							.font(.caption)
+							.buttonStyle(.borderless)
+					} else {
+						Button("改問題", systemImage: "pencil") {
+							editDraft = question
+							editing = (topic.id, true)
+						}
+						.font(.caption)
+						.labelStyle(.iconOnly)
+						.buttonStyle(.borderless)
+					}
+				}
 			}
 			if let recall = recallText(topic.concepts) {
 				Text(recall)
@@ -252,6 +271,9 @@ struct CardTreeView: View {
 				.font(.caption)
 				.foregroundStyle(.secondary)
 		}
+		.sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+			editSheet
+		}
 		.sheet(isPresented: $showingTranscript) {
 			NavigationStack {
 				TextEditor(text: $transcriptDraft)
@@ -312,9 +334,8 @@ struct CardTreeView: View {
 						fallbackLabel(note)
 							.padding(.leading, 22)
 					}
-					if card.kind == .custom, let topic, topic.kind != .note,
-						!topic.concepts.isEmpty {
-						moveToNoteMenu(card, concepts: topic.concepts)
+					if card.kind == .custom, let topic {
+						moveToNoteMenu(card, concepts: conceptChoices(for: topic))
 							.padding(.leading, 22)
 					}
 				}
@@ -463,6 +484,14 @@ struct CardTreeView: View {
 			.frame(maxWidth: .infinity, alignment: .leading)
 			.padding(.vertical, 7)
 			.padding(.horizontal, 10)
+			.contextMenu {
+				if card.kind == .custom, running[card.id] == nil {
+					Button("改問題重送", systemImage: "pencil") {
+						editDraft = card.title
+						editing = (card.id, false)
+					}
+				}
+			}
 			.background(
 				// 沒展開的長得像一顆等著被點的方塊，展開過的退成背景
 				card.isExpanded
@@ -588,6 +617,56 @@ struct CardTreeView: View {
 		running[card.id] = Task { await expand(card, imageJPEG: imageJPEG) }
 	}
 
+	private func conceptChoices(for topic: Card) -> [String] {
+		var names = topic.concepts
+		for name in store.conceptNamesForPrompt(limit: 50) where !names.contains(name) {
+			names.append(name)
+		}
+		return names
+	}
+
+	// MARK: - 改問題重送
+
+	/// 自己打的問題下得不好可以改再送：自訂節點清掉舊答案重展開；直接問的根整棵重生
+	private var editSheet: some View {
+		NavigationStack {
+			TextEditor(text: $editDraft)
+				.font(.body)
+				.padding()
+				.navigationTitle("改問題")
+				.navigationBarTitleDisplayMode(.inline)
+				.toolbar {
+					ToolbarItem(placement: .cancellationAction) {
+						Button("取消") { editing = nil }
+					}
+					ToolbarItem(placement: .confirmationAction) {
+						Button("重送") { resend() }
+							.disabled(editDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+					}
+				}
+		}
+		.presentationDetents([.medium])
+	}
+
+	private func resend() {
+		guard let editing else { return }
+		let text = editDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+		self.editing = nil
+		if editing.root {
+			running[editing.cardID] = Task { @MainActor in
+				defer { running[editing.cardID] = nil }
+				do { try await store.reask(topicID: editing.cardID, question: text) } catch {
+					guard !AIClient.isCancellation(error) else { return }
+					errorText = error.localizedDescription
+				}
+			}
+		} else {
+			store.resetCustom(cardID: editing.cardID, title: text)
+			guard let card = topic?.find(editing.cardID) else { return }
+			start(expanding: card)
+		}
+	}
+
 	/// 送給模型的「題目」欄：知識點樹與直接問的樹沒有題目，講清楚它是什麼
 	private func topicContext(_ topic: Card) -> String {
 		switch topic.kind {
@@ -612,13 +691,15 @@ struct CardTreeView: View {
 				path: Array(path.dropFirst()), // 第一個是題目本身，模型已經知道
 				style: store.teachingStyle,
 				wantFollowUps: card.kind != .custom,
-				// 自己打的問題才判斷屬不屬於概念知識；知識點樹裡問的本來就是
-				conceptChoices: (card.kind == .custom && topic.kind != .note) ? topic.concepts : [],
+				// 自己打的問題才判斷屬於哪個概念；清單是全部既有概念，這題的放前面
+				conceptChoices: card.kind == .custom ? conceptChoices(for: topic) : [],
 				imageJPEG: imageJPEG
 			)
+			// 知識點樹裡問的，判回同一個概念就不用再標
+			let concept = (topic.kind == .note && result.concept == topic.title) ? nil : result.concept
 			store.expand(
 				cardID: card.id, body: result.body, followUps: result.followUps,
-				noteConcept: result.concept, fallbackNote: result.fallbackNote)
+				noteConcept: concept, fallbackNote: result.fallbackNote)
 			// 剛講完的東西就是下一個問題最可能接的地方
 			attachID = card.id
 		} catch {

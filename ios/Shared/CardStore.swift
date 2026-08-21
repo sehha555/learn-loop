@@ -170,9 +170,47 @@ final class CardStore: ObservableObject {
 		save()
 	}
 
-	/// 題目樹裡被標成這個概念知識的問答，附上來源題目 —— 知識點頁連同概念頁自己問的一起列
+	/// 被模型歸到這個概念的問答（不管是在題目、直接問、還是別的概念頁問的），附上來源樹。
+	/// 這個概念自己的知識點樹不掃 —— 它的 children 本來就列在知識點區
 	func taggedNotes(for concept: String) -> [(card: Card, topic: Card)] {
-		problems.flatMap { topic in topic.cards(taggedWith: concept).map { ($0, topic) } }
+		topics
+			.filter { !($0.kind == .note && $0.concepts == [concept]) }
+			.flatMap { topic in topic.cards(taggedWith: concept).map { ($0, topic) } }
+	}
+
+	/// 改自己打的問題重送：清掉舊答案和它底下長出來的點，呼叫端接著重新展開
+	func resetCustom(cardID: UUID, title: String) {
+		for index in topics.indices {
+			let hit = topics[index].update(id: cardID) { card in
+				card.title = title
+				card.body = nil
+				card.children = []
+				card.noteConcept = nil
+				card.fallbackNote = nil
+				card.collapsed = false
+			}
+			if hit { break }
+		}
+		save()
+	}
+
+	/// 直接問的根問題改了：整棵重生（開場句、點、概念都換），id 與圖不變
+	func reask(topicID: UUID, question: String) async throws {
+		let imageData = try? Data(contentsOf: imageFileURL(topicID))
+		let result = try await ai.ask(
+			question: question, imageJPEG: imageData,
+			knownConcepts: conceptNamesForPrompt(limit: 50), style: teachingStyle)
+		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return }
+		var tree = topics[index]
+		tree.title = result.title
+		tree.body = result.status
+		tree.children = result.points.map { Card(title: $0.title, kind: $0.kind) }
+		tree.concepts = result.concepts
+		tree.transcript = result.transcript
+		tree.problem = question
+		tree.fallbackNote = result.fallbackNote
+		topics[index] = tree
+		save()
 	}
 
 	/// 使用者改過的抄錄。模型抄錯根號、上下標時，改這裡一次，之後追問全用對的版本

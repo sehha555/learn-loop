@@ -272,10 +272,13 @@ struct ConceptPageView: View {
 					path: [text],
 					style: store.teachingStyle,
 					wantFollowUps: false,
+					conceptChoices: store.conceptNamesForPrompt(limit: 50),
 					imageJPEG: imageData
 				)
+				// 模型若判它其實屬於別的概念，標上去讓那一頁也列出來；判回本頁就不用標
 				store.expand(
 					cardID: id, body: result.body, followUps: result.followUps,
+					noteConcept: result.concept == name ? nil : result.concept,
 					fallbackNote: result.fallbackNote)
 			} catch {
 				guard !AIClient.isCancellation(error) else { return }
