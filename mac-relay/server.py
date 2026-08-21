@@ -48,6 +48,21 @@ def extract_json(text: str) -> dict:
         return json.loads(LATEX_BACKSLASH.sub(r"\\\\", raw), strict=False)
 
 
+def result_envelope(stdout: str) -> dict:
+    """claude -p 的 stdout 偶爾不只一行 JSON（多帶事件訊息），只要 type=result 那個。"""
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("type") == "result":
+            return obj
+    raise RuntimeError(f"claude 沒回 result 物件：{stdout[:300]}")
+
+
 def call_claude(prompt: str, image_b64: str | None, schema: dict) -> dict:
     # 圖片落地成暫存檔讓 claude 用 Read 讀。放進獨立目錄並把它當工作目錄，
     # headless 模式下讀工作目錄內的檔案不會卡權限確認
@@ -75,7 +90,7 @@ def call_claude(prompt: str, image_b64: str | None, schema: dict) -> dict:
         )
         if out.returncode != 0:
             raise RuntimeError(out.stderr.strip()[:300] or "claude 執行失敗")
-        return extract_json(json.loads(out.stdout)["result"])
+        return extract_json(result_envelope(out.stdout)["result"])
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
