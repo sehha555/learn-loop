@@ -52,10 +52,12 @@ extension CardStore {
 		}
 		let result = try await ai.ingest(
 			text: text, imageJPEG: imageData, hintConcept: hintConcept,
-			knownConcepts: conceptNamesForPrompt(), style: teachingStyle)
+			knownConcepts: conceptNamesForPrompt(), knownChapters: knownChapters,
+			style: teachingStyle)
 		var tree = Card(title: "", kind: .free)
 		Self.apply(result, text: text, to: &tree)
 		insert(tree)
+		assignChapter(result.chapter, to: result.concepts)
 		// 原始截圖留檔 —— 病歷卡要能看到「題目長什麼樣」；追問附圖也用同一套，key 是那張卡的 id
 		if let imageData { saveImage(imageData, for: tree.id) }
 		return tree.id
@@ -66,10 +68,12 @@ extension CardStore {
 		let imageData = try? Data(contentsOf: imageFileURL(topicID))
 		let result = try await ai.ingest(
 			text: text, imageJPEG: imageData, hintConcept: nil,
-			knownConcepts: conceptNamesForPrompt(), style: teachingStyle)
+			knownConcepts: conceptNamesForPrompt(), knownChapters: knownChapters,
+			style: teachingStyle)
 		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return }
 		Self.apply(result, text: text, to: &topics[index])
 		save()
+		assignChapter(result.chapter, to: result.concepts)
 	}
 
 	/// 模型回覆寫進樹的根。ingest 新建與 reask 重生共用，兩邊的欄位對應不會走岔

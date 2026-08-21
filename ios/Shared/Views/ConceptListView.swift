@@ -5,6 +5,9 @@ import SwiftUI
 /// 下段其他概念照出現次數收在後面。
 struct ConceptListView: View {
 	@ObservedObject var store: CardStore
+	/// 收起來的章。改 @State 畫面才會重畫；UserDefaults 只負責記住
+	@State private var collapsed = Set(
+		UserDefaults.standard.stringArray(forKey: "collapsedChapters") ?? [])
 
 	var body: some View {
 		Group {
@@ -31,18 +34,33 @@ struct ConceptListView: View {
 							}
 						}
 					}
-					if !rest.isEmpty {
-						Section(review.isEmpty ? "" : "其他") {
-							ForEach(rest, id: \.name) { item in
-								NavigationLink(value: item.name) {
-									HStack {
-										Text(item.name)
-										Spacer()
-										Text(countLabel(item))
-											.font(.subheadline)
-											.foregroundStyle(.secondary)
+					// 其他概念照章分段 —— 攤平排 40 列沒人看；章的順序照出現題數
+					ForEach(chapterGroups(rest), id: \.chapter) { group in
+						Section {
+							if !collapsed.contains(group.chapter) {
+								ForEach(group.items, id: \.name) { item in
+									NavigationLink(value: item.name) {
+										HStack {
+											Text(item.name)
+											Spacer()
+											Text(countLabel(item))
+												.font(.subheadline)
+												.foregroundStyle(.secondary)
+										}
 									}
 								}
+							}
+						} header: {
+							GroupHeader(
+								title: group.chapter, detail: "\(group.items.count) 個概念",
+								collapsed: collapsed.contains(group.chapter)
+							) {
+								if collapsed.contains(group.chapter) {
+									collapsed.remove(group.chapter)
+								} else {
+									collapsed.insert(group.chapter)
+								}
+								UserDefaults.standard.set(Array(collapsed), forKey: "collapsedChapters")
 							}
 						}
 					}
@@ -50,6 +68,28 @@ struct ConceptListView: View {
 			}
 		}
 		.navigationTitle("概念")
+	}
+
+	private typealias Item = (name: String, appearances: Int, stuck: Int, notes: Int)
+
+	/// 依章分組。還沒分章的（模型還沒補到）收在最後一段「還沒分章」
+	private func chapterGroups(_ items: [Item]) -> [(chapter: String, items: [Item])] {
+		var order: [String] = []
+		var byChapter: [String: [Item]] = [:]
+		for item in items {
+			let chapter = store.chapters[item.name] ?? "還沒分章"
+			if byChapter[chapter] == nil { order.append(chapter) }
+			byChapter[chapter, default: []].append(item)
+		}
+		return order
+			.sorted { a, b in
+				if a == "還沒分章" { return false }
+				if b == "還沒分章" { return true }
+				let ta = byChapter[a]!.reduce(0) { $0 + $1.appearances }
+				let tb = byChapter[b]!.reduce(0) { $0 + $1.appearances }
+				return ta == tb ? a < b : ta > tb
+			}
+			.map { ($0, byChapter[$0]!) }
 	}
 
 	/// 「3 題 · 2 點」—— 題目與知識點分開數，哪邊是 0 就不寫

@@ -73,7 +73,10 @@ struct TopicListView: View {
 	}
 
 	private func groupHeader(_ group: (name: String, topics: [Card])) -> some View {
-		Button {
+		GroupHeader(
+			title: group.name, detail: "\(group.topics.count) 題",
+			collapsed: collapsedGroups.contains(group.name)
+		) {
 			if collapsedGroups.contains(group.name) {
 				collapsedGroups.remove(group.name)
 			} else {
@@ -81,18 +84,7 @@ struct TopicListView: View {
 			}
 			// 跟樹頁的節點一樣，收合要記得
 			UserDefaults.standard.set(Array(collapsedGroups), forKey: "collapsedTopicGroups")
-		} label: {
-			HStack {
-				Text(group.name)
-				Spacer()
-				Text("\(group.topics.count) 題")
-				Image(systemName: collapsedGroups.contains(group.name) ? "chevron.right" : "chevron.down")
-					.font(.caption2.weight(.semibold))
-			}
-			.contentShape(Rectangle())
-			.padding(.vertical, 4)
 		}
-		.buttonStyle(.plain)
 	}
 
 	/// 預覽放題目原文（舊題沒抄就退回診斷句），底下一排概念 tag，主概念藍色

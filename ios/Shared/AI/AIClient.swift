@@ -131,10 +131,12 @@ struct AIClient {
 		/// 題目原文（只有出題者寫的那句）
 		let problem: String
 		let concepts: [String]
+		/// concepts 共同屬於的章（整章的大詞）。概念總覽靠它分層
+		let chapter: String
 		let points: [Point]
 
 		enum CodingKeys: String, CodingKey {
-			case title, situation, status, transcript, problem, concepts, points
+			case title, situation, status, transcript, problem, concepts, chapter, points
 			case isProblem = "is_problem"
 		}
 
@@ -157,7 +159,7 @@ struct AIClient {
 	///     同一個概念每次寫法不同的話，「你第幾次卡」就數不出來
 	func ingest(
 		text: String, imageJPEG: Data?, hintConcept: String?, knownConcepts: [String],
-		style: TeachingStyle
+		knownChapters: [String], style: TeachingStyle
 	) async throws -> Ingested {
 		let hasImage = imageJPEG != nil
 		var prompt = "你是坐在旁邊的助教。使用者丟來了一樣東西：\n"
@@ -216,6 +218,8 @@ struct AIClient {
 		不要太寬（「數學」「三角函數」這種整章的不行），
 		也不要太窄（「sin75度」這種只屬於這一題的不行）。每個二到十個字。
 		很難抽的話就給最貼近內容的具體詞，寧可具體而不完美，也絕不要拿科目名或整章的大詞充數。
+		另外給 chapter：這些 concepts 共同屬於的「章」，粒度像教科書目錄的章
+		（「積分技巧」「三角函數」「牛頓力學」「英文時態」），二到八個字，不要科目名。
 
 		第五步，problem：is_problem 為 true 時給題目本身那一句（出題者寫的部分），
 		不含題號、不含結尾等號、不含他自己寫的任何算式或過程；題目是他打字給的就照抄他打的。
@@ -250,6 +254,13 @@ struct AIClient {
 			concepts 裡如果有語意相同的，務必重用清單裡的原名，一個字都不要改。
 			"""
 		}
+		if !knownChapters.isEmpty {
+			prompt += """
+
+
+			他過去的章有：\(knownChapters.joined(separator: "、"))。chapter 有語意相同的務必重用原名。
+			"""
+		}
 		return try await call(
 			text: prompt, imageBase64: imageJPEG?.base64EncodedString(),
 			toolName: "record_answer", schema: Self.ingestSchema(withImage: hasImage))
@@ -267,12 +278,15 @@ struct AIClient {
 				"type": "array", "items": ["type": "string"],
 				"minItems": 1, "maxItems": 4,
 			],
+			"chapter": ["type": "string"],
 			"points": [
 				"type": "array",
 				"items": pointSchema(kinds: ["step", "question", "supplement", "trap", "extend"]),
 			],
 		]
-		var required = ["title", "is_problem", "situation", "status", "problem", "concepts", "points"]
+		var required = [
+			"title", "is_problem", "situation", "status", "problem", "concepts", "chapter", "points",
+		]
 		if withImage {
 			properties["transcript"] = ["type": "string"]
 			required.append("transcript")
@@ -388,6 +402,51 @@ struct AIClient {
 		return Expansion(
 			body: result.body, followUps: result.followUps, concept: concept,
 			fallbackNote: result.fallbackNote)
+	}
+
+	// MARK: - 概念分章
+
+	struct ChapterAssignment: Decodable {
+		let concept: String
+		let chapter: String
+	}
+
+	private struct Chaptered: Decodable, FallbackNoted {
+		var fallbackNote: String?
+		let assignments: [ChapterAssignment]
+	}
+
+	/// 「章」欄上線前累積的概念，一次補分章。只送名字，一個呼叫搞定
+	func assignChapters(concepts: [String], knownChapters: [String]) async throws
+		-> [ChapterAssignment]
+	{
+		var prompt = """
+		下面是一個學生累積的概念名，每個請判斷屬於哪一「章」——粒度像教科書目錄的章
+		（「積分技巧」「三角函數」「牛頓力學」「英文時態」），二到八個字，不要科目名。
+		同一章的概念章名要一模一樣。全部繁體中文。
+
+		\(concepts.joined(separator: "、"))
+		"""
+		if !knownChapters.isEmpty {
+			prompt += "\n\n已經有的章：\(knownChapters.joined(separator: "、"))。有語意相同的務必重用原名。"
+		}
+		let schema: [String: Any] = [
+			"type": "object",
+			"properties": [
+				"assignments": [
+					"type": "array",
+					"items": [
+						"type": "object",
+						"properties": ["concept": ["type": "string"], "chapter": ["type": "string"]],
+						"required": ["concept", "chapter"],
+					],
+				],
+			],
+			"required": ["assignments"],
+		]
+		let result: Chaptered = try await call(
+			text: prompt, imageBase64: nil, toolName: "record_chapters", schema: schema)
+		return result.assignments
 	}
 
 	// MARK: - 概念的整理頁

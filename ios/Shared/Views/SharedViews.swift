@@ -54,6 +54,29 @@ struct KindMark: View {
 	}
 }
 
+/// 可收合的段落標題：名字、右邊的數量、箭頭。題目清單的概念段與概念總覽的章都用它
+struct GroupHeader: View {
+	let title: String
+	let detail: String
+	let collapsed: Bool
+	let toggle: () -> Void
+
+	var body: some View {
+		Button(action: toggle) {
+			HStack {
+				Text(title)
+				Spacer()
+				Text(detail)
+				Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+					.font(.caption2.weight(.semibold))
+			}
+			.contentShape(Rectangle())
+			.padding(.vertical, 4)
+		}
+		.buttonStyle(.plain)
+	}
+}
+
 extension View {
 	/// 「出錯了」的一鍵 alert。訊息設 nil 就關
 	func errorAlert(_ message: Binding<String?>) -> some View {

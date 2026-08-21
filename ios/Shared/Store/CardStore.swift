@@ -13,6 +13,8 @@ final class CardStore: ObservableObject {
 	@Published internal(set) var topics: [Card] = []
 	/// 概念 → 模型整理頁。存 wiki.json，跟 topics.json 分開 —— 它是衍生物，樹才是原始資料
 	@Published internal(set) var wiki: [String: WikiPage] = [:]
+	/// 概念 → 章。模型在 ingest 時順便判，第一次出現就定下來；概念總覽靠它分層
+	@Published internal(set) var chapters: [String: String] = [:]
 
 	/// 真正的題目（不含概念知識點、直接問的那些樹）。清單、統計、病歷卡的題目紀錄都看這個
 	var problems: [Card] { topics.filter { $0.kind != .note && $0.kind != .free } }
@@ -27,6 +29,7 @@ final class CardStore: ObservableObject {
 
 	private let fileURL: URL
 	let wikiURL: URL
+	let chaptersURL: URL
 	let imagesDir: URL
 	private let defaults: UserDefaults
 
@@ -38,12 +41,14 @@ final class CardStore: ObservableObject {
 			for: .documentDirectory, in: .userDomainMask)[0]
 		fileURL = dir.appendingPathComponent("topics.json")
 		wikiURL = dir.appendingPathComponent("wiki.json")
+		chaptersURL = dir.appendingPathComponent("chapters.json")
 		imagesDir = dir.appendingPathComponent("images", isDirectory: true)
 		try? FileManager.default.createDirectory(
 			at: imagesDir, withIntermediateDirectories: true)
 		defaults = UserDefaults(suiteName: Self.appGroupID) ?? .standard
 		load()
 		loadWiki()
+		loadChapters()
 	}
 
 	// MARK: - API key
@@ -195,6 +200,7 @@ final class CardStore: ObservableObject {
 		save()
 	}
 
-	/// backfillProblems 的進行中旗標（stored property 不能放 extension）
+	/// backfillProblems／backfillChapters 的進行中旗標（stored property 不能放 extension）
 	var backfilling = false
+	var backfillingChapters = false
 }
