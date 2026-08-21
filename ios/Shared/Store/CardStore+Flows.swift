@@ -26,17 +26,11 @@ extension CardStore {
 		backfilling = true
 		defer { backfilling = false }
 		for topic in problems where topic.problem == nil {
-			guard let data = try? Data(contentsOf: imageFileURL(topic.id)) else { continue }
-			guard let text = try? await ai.extractProblem(imageJPEG: data),
-				!text.isEmpty,
-				let index = topics.firstIndex(where: { $0.id == topic.id })
-			else { continue }
-			topics[index].problem = Card.stripProblemNumber(text)
-			save()
+			await reextractProblem(topicID: topic.id)
 		}
 	}
 
-	/// 抄得不乾淨的那題，重新抄一次
+	/// 拿存著的截圖抄一次題目原文。沒圖、抄不出來就不動
 	func reextractProblem(topicID: UUID) async {
 		guard let data = try? Data(contentsOf: imageFileURL(topicID)),
 			let text = try? await ai.extractProblem(imageJPEG: data), !text.isEmpty,
@@ -83,7 +77,7 @@ extension CardStore {
 		tree.title = result.title
 		tree.body = result.status
 		tree.kind = result.isProblem ? .topic : .free
-		tree.children = result.points.map { Card(title: $0.title, kind: $0.kind) }
+		tree.children = result.points.map(\.card)
 		tree.concepts = result.concepts
 		tree.situation = result.parsedSituation
 		tree.transcript = result.transcript

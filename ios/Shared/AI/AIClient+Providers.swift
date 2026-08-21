@@ -22,11 +22,16 @@ extension AIClient {
 		if let imageBase64 { body["image_base64"] = imageBase64 }
 		request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-		let (data, response) = try await Self.transport.send(request)
+		return try JSONDecoder().decode(T.self, from: try await Self.send(request))
+	}
+
+	/// 送出、非 200 就連回應內文一起丟出來。中繼站與雲端兩條路共用
+	static func send(_ request: URLRequest) async throws -> Data {
+		let (data, response) = try await transport.send(request)
 		if let http = response as? HTTPURLResponse, http.statusCode != 200 {
 			throw AIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
 		}
-		return try JSONDecoder().decode(T.self, from: data)
+		return data
 	}
 
 	// MARK: - Google Gemini

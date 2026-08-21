@@ -65,11 +65,7 @@ struct CardTreeView: View {
 		.sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
 			editSheet
 		}
-		.alert("出錯了", isPresented: .constant(errorText != nil)) {
-			Button("好") { errorText = nil }
-		} message: {
-			Text(errorText ?? "")
-		}
+		.errorAlert($errorText)
 	}
 
 	// MARK: - 哪些節點看得到
@@ -428,10 +424,7 @@ struct CardTreeView: View {
 				.foregroundStyle(card.kind.tint)
 				.frame(width: 14)
 		} else {
-			Text(card.kind.mark)
-				.font(.caption2.weight(.bold))
-				.foregroundStyle(card.kind.tint)
-				.frame(width: 14)
+			KindMark(kind: card.kind, wide: true)
 		}
 	}
 

@@ -41,6 +41,30 @@ struct FlowLayout: Layout {
 	}
 }
 
+/// 節點種類的小記號（樹頁、病歷卡、輸入列前面都是它）。wide = 固定寬度讓同欄對齊
+struct KindMark: View {
+	let kind: Card.Kind
+	var wide: Bool = false
+
+	var body: some View {
+		Text(kind.mark)
+			.font(.caption2.weight(.bold))
+			.foregroundStyle(kind.tint)
+			.frame(width: wide ? 14 : nil)
+	}
+}
+
+extension View {
+	/// 「出錯了」的一鍵 alert。訊息設 nil 就關
+	func errorAlert(_ message: Binding<String?>) -> some View {
+		alert("出錯了", isPresented: .constant(message.wrappedValue != nil)) {
+			Button("好") { message.wrappedValue = nil }
+		} message: {
+			Text(message.wrappedValue ?? "")
+		}
+	}
+}
+
 /// 樹的層級直線。樹頁的縮排線和病歷卡的內容邊線共用這一條，改視覺一處生效。
 struct TreeLine: View {
 	var body: some View {
@@ -149,10 +173,7 @@ struct AskField: View {
 				}
 			}
 			HStack(spacing: 8) {
-				Text(Card.Kind.custom.mark)
-					.font(.caption2.weight(.bold))
-					.foregroundStyle(Card.Kind.custom.tint)
-					.frame(width: 14)
+				KindMark(kind: .custom, wide: true)
 				if !running {
 					// 用系統 PasteButton 才不會每次跳「允許貼上？」
 					PasteButton(payloadType: PastedImage.self) { pasted in
@@ -205,11 +226,7 @@ struct AskBar: View {
 			text: $text, image: $image, placeholder: placeholder, running: asking != nil,
 			onCancel: { asking?.cancel() }, onSubmit: submit
 		)
-		.alert("沒辦法處理", isPresented: .constant(errorMessage != nil)) {
-			Button("好") { errorMessage = nil }
-		} message: {
-			Text(errorMessage ?? "")
-		}
+		.errorAlert($errorMessage)
 	}
 
 	private func submit() {

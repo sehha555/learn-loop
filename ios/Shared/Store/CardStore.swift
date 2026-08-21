@@ -108,15 +108,18 @@ final class CardStore: ObservableObject {
 		cardID: UUID, body: String, followUps: [AIClient.Point], noteConcept: String? = nil,
 		fallbackNote: String? = nil
 	) {
+		mutate(cardID) { card in
+			card.body = body
+			card.noteConcept = noteConcept
+			card.fallbackNote = fallbackNote
+			card.children.append(contentsOf: followUps.map(\.card))
+		}
+	}
+
+	/// 找到任一棵樹裡的這個節點、就地改、存檔。四個「改一個節點」的入口共用
+	private func mutate(_ cardID: UUID, _ change: (inout Card) -> Void) {
 		for index in topics.indices {
-			let hit = topics[index].update(id: cardID) { card in
-				card.body = body
-				card.noteConcept = noteConcept
-				card.fallbackNote = fallbackNote
-				card.children.append(
-					contentsOf: followUps.map { Card(title: $0.title, kind: $0.kind) })
-			}
-			if hit { break }
+			if topics[index].update(id: cardID, change) { break }
 		}
 		save()
 	}
@@ -139,10 +142,7 @@ final class CardStore: ObservableObject {
 
 	/// 收合／展開一個節點，落地存檔
 	func toggleCollapsed(cardID: UUID) {
-		for index in topics.indices {
-			if topics[index].update(id: cardID, { $0.collapsed.toggle() }) { break }
-		}
-		save()
+		mutate(cardID) { $0.collapsed.toggle() }
 	}
 
 	// MARK: - 概念知識點
@@ -154,10 +154,7 @@ final class CardStore: ObservableObject {
 
 	/// 手動改模型的判斷：標成某概念的知識（nil = 取消）
 	func setNoteConcept(cardID: UUID, concept: String?) {
-		for index in topics.indices {
-			if topics[index].update(id: cardID, { $0.noteConcept = concept }) { break }
-		}
-		save()
+		mutate(cardID) { $0.noteConcept = concept }
 	}
 
 	/// 被模型歸到這個概念的問答（不管是在題目、直接問、還是別的概念頁問的），附上來源樹。
@@ -170,18 +167,14 @@ final class CardStore: ObservableObject {
 
 	/// 改自己打的問題重送：清掉舊答案和它底下長出來的點，呼叫端接著重新展開
 	func resetCustom(cardID: UUID, title: String) {
-		for index in topics.indices {
-			let hit = topics[index].update(id: cardID) { card in
-				card.title = title
-				card.body = nil
-				card.children = []
-				card.noteConcept = nil
-				card.fallbackNote = nil
-				card.collapsed = false
-			}
-			if hit { break }
+		mutate(cardID) { card in
+			card.title = title
+			card.body = nil
+			card.children = []
+			card.noteConcept = nil
+			card.fallbackNote = nil
+			card.collapsed = false
 		}
-		save()
 	}
 
 	/// 使用者改過的抄錄。模型抄錯根號、上下標時，改這裡一次，之後追問全用對的版本

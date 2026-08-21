@@ -49,6 +49,8 @@ struct AIClient {
 	struct Point: Decodable {
 		let kind: Card.Kind
 		let title: String
+		/// 掛進樹的樣子：只有標題，內容等他點了才生
+		var card: Card { Card(title: title, kind: kind) }
 	}
 
 	/// 模型回覆都多帶一句：這次是不是中繼站失敗退回雲端、為什麼。
@@ -421,11 +423,7 @@ struct AIClient {
 			 Self.extractAnthropic)
 		}
 
-		let (data, response) = try await Self.transport.send(request)
-		if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-			throw AIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
-		}
-		let payload = try extract(data)
+		let payload = try extract(try await Self.send(request))
 		var result = try JSONDecoder().decode(T.self, from: payload)
 		result.fallbackNote = fallbackNote
 		return result

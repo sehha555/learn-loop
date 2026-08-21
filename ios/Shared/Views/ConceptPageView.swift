@@ -108,9 +108,7 @@ struct ConceptPageView: View {
 				NavigationLink(value: tree.id) {
 					VStack(alignment: .leading, spacing: 4) {
 						HStack(alignment: .firstTextBaseline, spacing: 6) {
-							Text(Card.Kind.free.mark)
-								.font(.caption2.weight(.bold))
-								.foregroundStyle(Card.Kind.free.tint)
+							KindMark(kind: .free)
 							MathText(text: tree.problem ?? tree.title, font: .subheadline.weight(.semibold), size: 15)
 								.multilineTextAlignment(.leading)
 						}
@@ -147,9 +145,7 @@ struct ConceptPageView: View {
 	private func noteCard(_ question: Card, source: Card?) -> some View {
 		VStack(alignment: .leading, spacing: 6) {
 			HStack(alignment: .firstTextBaseline, spacing: 6) {
-				Text(Card.Kind.custom.mark)
-					.font(.caption2.weight(.bold))
-					.foregroundStyle(Card.Kind.custom.tint)
+				KindMark(kind: .custom)
 				MathText(text: question.title, font: .subheadline.weight(.semibold), size: 15)
 			}
 			if let image = store.image(for: question.id) {
@@ -201,9 +197,7 @@ struct ConceptPageView: View {
 					.foregroundStyle(.tertiary)
 				ForEach(questions) { question in
 					HStack(alignment: .firstTextBaseline, spacing: 6) {
-						Text(Card.Kind.custom.mark)
-							.font(.caption2.weight(.bold))
-							.foregroundStyle(Card.Kind.custom.tint)
+						KindMark(kind: .custom)
 						Text(question.title)
 							.font(.callout)
 							.foregroundStyle(.primary.opacity(0.85))
@@ -300,9 +294,7 @@ struct ConceptPageView: View {
 						}
 						ForEach(topic.children.filter { $0.kind == .custom }) { question in
 							HStack(alignment: .firstTextBaseline, spacing: 6) {
-								Text(Card.Kind.custom.mark)
-									.font(.caption2.weight(.bold))
-									.foregroundStyle(Card.Kind.custom.tint)
+								KindMark(kind: .custom)
 								Text("你問過：\(question.title)")
 									.font(.callout)
 									.foregroundStyle(.primary.opacity(0.85))
