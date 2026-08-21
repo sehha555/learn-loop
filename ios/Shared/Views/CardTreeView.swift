@@ -113,11 +113,15 @@ struct CardTreeView: View {
 					Text("你問：\(question)")
 						.font(.caption)
 						.foregroundStyle(.secondary)
-					if running[topic.id] != nil {
+					// 重生中的記號放 store：離開這頁再回來 running 是空的，轉圈圈不能跟著消失，
+					// 不然會以為沒送出去、再送一次
+					if running[topic.id] != nil || store.reasking.contains(topic.id) {
 						ProgressView().controlSize(.mini)
-						Button("取消") { running[topic.id]?.cancel() }
-							.font(.caption)
-							.buttonStyle(.borderless)
+						if let task = running[topic.id] {
+							Button("取消") { task.cancel() }
+								.font(.caption)
+								.buttonStyle(.borderless)
+						}
 					} else {
 						Button("改問題", systemImage: "pencil") {
 							editDraft = question
@@ -552,6 +556,8 @@ struct CardTreeView: View {
 		let text = editDraft.trimmingCharacters(in: .whitespacesAndNewlines)
 		self.editing = nil
 		if editing.root {
+			// 上一次還在跑就先砍掉，不然舊的晚回來會把新答案蓋掉
+			running[editing.cardID]?.cancel()
 			running[editing.cardID] = Task { @MainActor in
 				defer { running[editing.cardID] = nil }
 				do { try await store.reask(topicID: editing.cardID, text: text) } catch {

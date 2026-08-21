@@ -65,6 +65,8 @@ extension CardStore {
 
 	/// 根問題改了重送：整棵重生（種類、開場句、點、概念都可能換），id 與圖不變
 	func reask(topicID: UUID, text: String) async throws {
+		reasking.insert(topicID)
+		defer { reasking.remove(topicID) }
 		let imageData = try? Data(contentsOf: imageFileURL(topicID))
 		let result = try await ai.ingest(
 			text: text, imageJPEG: imageData, hintConcept: nil,

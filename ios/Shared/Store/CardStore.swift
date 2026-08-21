@@ -15,6 +15,8 @@ final class CardStore: ObservableObject {
 	@Published internal(set) var wiki: [String: WikiPage] = [:]
 	/// 概念 → 章。模型在 ingest 時順便判，第一次出現就定下來；概念總覽靠它分層
 	@Published internal(set) var chapters: [String: String] = [:]
+	/// 正在改問題重生的樹根。放 store 不放 view：樹頁離開再回來也要看得到轉圈圈
+	@Published internal(set) var reasking: Set<UUID> = []
 
 	/// 真正的題目（不含概念知識點、直接問的那些樹）。清單、統計、病歷卡的題目紀錄都看這個
 	var problems: [Card] { topics.filter { $0.kind != .note && $0.kind != .free } }
