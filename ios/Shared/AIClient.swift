@@ -201,14 +201,20 @@ struct AIClient {
 	\(formatRule)
 	"""
 
-	/// 輸出格式是全 client 的不變量，diagnose / expand 共用一份，改一處兩邊生效
-	private static let formatRule = """
-	全部繁體中文。數學式用 LaTeX 寫，前後各包一個 $ 直接混在句子裡
-	（例如「先把 $\\sqrt{2}$ 移到左邊」「展開 $(x+3)^2$」），不要用 $$。
-	只用基本 LaTeX 指令（\\frac、\\sqrt、\\int、^、_ 這類），
-	不要用 \\dfrac、\\displaystyle 這些排版變體，渲染器不認得。
-	不是數學式的地方不要出現 $。除了上面明確允許的記號以外不要用 markdown。
-	"""
+	/// 輸出格式是全 client 的不變量，diagnose / ask / expand 共用一份，改一處全生效
+	private static let formatRule = formatRuleText(displayMath: false)
+
+	/// displayMath：「完整解法」口吻的獨立式子要用 $$ 包（見 bodyRule），
+	/// 其他地方一律禁 $$ —— 之前兩條規則打架，模型選擇遵守禁令，獨立式子從沒出現過
+	private static func formatRuleText(displayMath: Bool) -> String {
+		"""
+		全部繁體中文。數學式用 LaTeX 寫，前後各包一個 $ 直接混在句子裡
+		（例如「先把 $\\sqrt{2}$ 移到左邊」「展開 $(x+3)^2$」）\(displayMath ? "；只有要獨立成一行的重要式子才單獨一行、前後用 $$ 包" : "，不要用 $$")。
+		只用基本 LaTeX 指令（\\frac、\\sqrt、\\int、^、_ 這類），
+		不要用 \\dfrac、\\displaystyle 這些排版變體，渲染器不認得。
+		不是數學式的地方不要出現 $。除了上面明確允許的記號以外不要用 markdown。
+		"""
+	}
 
 	/// diagnose 和 expand 的 point 結構相同，只差合法的 kind 清單
 	private static func pointSchema(kinds: [String]) -> [String: Any] {
@@ -465,7 +471,7 @@ struct AIClient {
 		3. \(followUpRule)
 		4. 不要重複已經講過的東西；他問的如果指涉前面某一段（「第二步為什麼」「那個公式」），
 		   就對著那一段回答。
-		5. \(Self.formatRule)\(conceptRule)
+		5. \(Self.formatRuleText(displayMath: style == .worked))\(conceptRule)
 		"""
 		let result: Expansion = try await call(
 			text: prompt,
