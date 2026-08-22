@@ -19,6 +19,21 @@ extension CardStore {
 		try? data.write(to: imageFileURL(cardID), options: .atomic)
 	}
 
+	// MARK: - 模型畫的圖
+
+	/// 展開某個點時模型附的圖（中繼站畫的）。跟使用者附的圖分開存 —— 自己打的問題兩種都可能有
+	func figureFileURL(_ cardID: UUID) -> URL {
+		imagesDir.appendingPathComponent("\(cardID.uuidString)-figure.png")
+	}
+
+	func figure(for cardID: UUID) -> UIImage? {
+		UIImage(contentsOfFile: figureFileURL(cardID).path)
+	}
+
+	func saveFigure(_ data: Data, for cardID: UUID) {
+		try? data.write(to: figureFileURL(cardID), options: .atomic)
+	}
+
 	/// 「題目原文」欄上線前拍的舊題，拿存著的截圖補抄一次。一次只跑一題（不要同時開
 	/// 好幾個 claude），失敗就跳過、下次啟動再試；沒圖的舊題沒得補，維持名字當大標
 	func backfillProblems() async {

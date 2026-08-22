@@ -296,18 +296,23 @@ struct AIClient {
 		let body: String
 		/// 自己打的問題才有：這問題屬於哪個概念的知識（不只關這題），nil = 就是這題的事
 		let concept: String?
+		/// 中繼站把模型給的畫圖程式跑成的 PNG（base64）。雲端那條路沒有
+		let figurePNG: String?
 		var fallbackNote: String?
 
 		enum CodingKeys: String, CodingKey {
 			case body, concept
+			case figurePNG = "figure_png"
 		}
+
+		var figureData: Data? { figurePNG.flatMap { Data(base64Encoded: $0) } }
 	}
 
 	/// conceptChoices 非空時多要一個 concept 欄位：模型判斷這個問答屬於哪個概念。
 	/// 不用 enum 綁死 —— 清單只是對齊用，沒有貼切的要讓它取新名字
 	private static func expandSchema(conceptChoices: [String]) -> [String: Any] {
-		var properties: [String: Any] = ["body": ["type": "string"]]
-		var required = ["body"]
+		var properties: [String: Any] = ["body": ["type": "string"], "figure": ["type": "string"]]
+		var required = ["body", "figure"]
 		if !conceptChoices.isEmpty {
 			properties["concept"] = ["type": "string"]
 			required.append("concept")
@@ -363,7 +368,13 @@ struct AIClient {
 		2. \(style.modeRule)
 		3. 不要重複已經講過的東西；他問的如果指涉前面某一步（路徑裡寫「第 2 步「…」：」就是針對那一步），
 		   就對著那一步回答，不要從頭講。
-		4. \(Self.formatRule)\(conceptRule)
+		4. \(Self.formatRule)
+		5. figure：這一段如果有一張圖會讓他更容易懂（積分區域、函數圖形、幾何關係、向量、
+		   曲線與切線這類）就給一段 matplotlib 程式碼，只用 plt 和 np（已經 import 好了，
+		   不要自己 import、不要 plt.show()、不要 savefig、不要開新 figure），
+		   畫在現有的圖上、標軸、該塗的區域用 fill_between 塗淡色、關鍵點標出來；
+		   文字用繁體中文或數學符號都可以。圖不會讓理解變容易的（純代數、純計算）就給空字串。
+		   一個回答最多一張圖。\(conceptRule)
 		"""
 		let result: Expansion = try await call(
 			text: prompt,
@@ -375,7 +386,9 @@ struct AIClient {
 		let concept = result.concept
 			.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
 			.flatMap { ($0.isEmpty || $0 == "（這題專屬）") ? nil : $0 }
-		return Expansion(body: result.body, concept: concept, fallbackNote: result.fallbackNote)
+		return Expansion(
+			body: result.body, concept: concept, figurePNG: result.figurePNG,
+			fallbackNote: result.fallbackNote)
 	}
 
 	// MARK: - 概念分章

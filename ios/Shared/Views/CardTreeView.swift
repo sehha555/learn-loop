@@ -254,6 +254,16 @@ struct CardTreeView: View {
 					stepBody(body, of: card.id)
 						.padding(.leading, 22)
 						.padding(.trailing, 4)
+					if let figure = store.figure(for: card.id) {
+						// 模型畫的圖：寬度跟著欄位、不放大超過原尺寸
+						Image(uiImage: figure)
+							.resizable()
+							.scaledToFit()
+							.frame(maxWidth: figure.size.width)
+							.clipShape(RoundedRectangle(cornerRadius: 8))
+							.overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(.separator)))
+							.padding(.leading, 22)
+					}
 					if let note = card.fallbackNote {
 						fallbackLabel(note)
 							.padding(.leading, 22)
@@ -306,7 +316,7 @@ struct CardTreeView: View {
 	/// 區塊裡每一行各自渲染：**粗體標題**、$$ 獨立式子、一般解說句
 	private func stepBody(_ text: String, of cardID: UUID) -> some View {
 		let blocks = StructuredBody.blocks(of: text)
-		return VStack(alignment: .leading, spacing: 12) {
+		return VStack(alignment: .leading, spacing: 16) {
 			ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
 				let focused = stepFocus?.cardID == cardID && stepFocus?.number == index + 1
 				Button {
@@ -324,7 +334,7 @@ struct CardTreeView: View {
 							.frame(width: 16, height: 16)
 							.background(
 								focused ? Color.accentColor : Color(.tertiarySystemFill), in: Circle())
-						VStack(alignment: .leading, spacing: 6) {
+						VStack(alignment: .leading, spacing: 8) {
 							ForEach(Array(block.enumerated()), id: \.offset) { _, line in
 								StructuredLine(line)
 							}
@@ -355,8 +365,8 @@ struct CardTreeView: View {
 				marker(card)
 				MathText(
 					text: card.title,
-					font: .subheadline.weight(card.isExpanded ? .semibold : .regular),
-					size: 15
+					font: .body.weight(card.isExpanded ? .semibold : .regular),
+					size: 17
 				)
 				.foregroundStyle(card.isExpanded ? .primary : .secondary)
 				.multilineTextAlignment(.leading)
@@ -578,6 +588,7 @@ struct CardTreeView: View {
 			)
 			// 知識點樹裡問的，判回同一個概念就不用再標
 			let concept = (topic.kind == .note && result.concept == topic.title) ? nil : result.concept
+			if let figure = result.figureData { store.saveFigure(figure, for: card.id) }
 			store.expand(
 				cardID: card.id, body: result.body, noteConcept: concept,
 				fallbackNote: result.fallbackNote)

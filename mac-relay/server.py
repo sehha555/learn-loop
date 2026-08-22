@@ -27,6 +27,26 @@ PORT = 8787
 CALLS_LOG = os.path.expanduser("~/Library/Logs/learn-loop-calls.jsonl")
 # claude 一次呼叫含思考可能要一兩分鐘，比照 app 端的等待上限
 CLAUDE_TIMEOUT = 180
+# 畫圖用的 python（裝了 matplotlib 的獨立 venv，不碰系統 python）。
+# 建法：python3 -m venv "$FIGURE_PYTHON 的上兩層" && .../bin/python -m pip install matplotlib
+FIGURE_PYTHON = os.path.expanduser("~/Library/Application Support/learn-loop/venv/bin/python")
+FIGURE_TIMEOUT = 30
+# 模型給的畫圖程式前面接這段：不開視窗、中文字型、統一尺寸；後面接存檔
+FIGURE_PRELUDE = '''
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+plt.rcParams["font.family"] = ["PingFang TC", "Heiti TC", "DejaVu Sans"]
+plt.rcParams["axes.unicode_minus"] = False
+plt.figure(figsize=(5, 3.6), dpi=160)
+'''
+# \le、\ge、\ne 後面不是字母的，補成 \leq、\geq、\neq
+FIGURE_MATH_ALIASES = re.compile(r"\\(?:le|ge|ne)(?![A-Za-z])")
+FIGURE_EPILOGUE = '''
+plt.tight_layout()
+plt.savefig("figure.png", transparent=False, facecolor="white")
+'''
 
 
 # 沒跳脫的 LaTeX 反斜線：後面接兩個以上英文字母的是指令（\\frac、\\int、\\neq ——
@@ -98,13 +118,45 @@ def call_claude(prompt: str, image_b64: str | None, schema: dict) -> dict:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+def render_figure(code: str) -> str | None:
+    """模型回的 matplotlib 程式跑成 PNG，回 base64。畫不出來就回 None、原因進 log ——
+    圖是附加的，畫失敗不該讓整個回答跟著失敗。"""
+    if not os.path.exists(FIGURE_PYTHON):
+        print("  ↳ 圖略過：找不到畫圖用的 python", flush=True)
+        return None
+    # matplotlib 的數學字型只認 \leq 不認 \le（LaTeX 兩種都行，模型愛寫短的）
+    code = FIGURE_MATH_ALIASES.sub(lambda m: m.group(0) + "q", code)
+    workdir = tempfile.mkdtemp(prefix="learn-loop-figure-")
+    try:
+        script = os.path.join(workdir, "draw.py")
+        png = os.path.join(workdir, "figure.png")
+        # 第一次正常畫；標籤裡的數學式還是解析不了就關掉數學字型重畫，文字照印、圖照出
+        for extra in ("", 'plt.rcParams["text.parse_math"] = False\n'):
+            with open(script, "w") as f:
+                f.write(FIGURE_PRELUDE + extra + code + FIGURE_EPILOGUE)
+            out = subprocess.run(
+                [FIGURE_PYTHON, script], capture_output=True, text=True,
+                timeout=FIGURE_TIMEOUT, cwd=workdir,
+            )
+            if out.returncode == 0 and os.path.exists(png):
+                with open(png, "rb") as f:
+                    return base64.b64encode(f.read()).decode()
+            print(f"  ↳ 圖畫失敗：{out.stderr.strip()[-300:]}", flush=True)
+        return None
+    except subprocess.TimeoutExpired:
+        print("  ↳ 圖畫失敗：超過 30 秒", flush=True)
+        return None
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
 def record_call(prompt: str, has_image: bool, result: dict, seconds: float) -> None:
     entry = {
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "has_image": has_image,
         "seconds": round(seconds),
         "prompt": prompt,
-        "result": result,
+        "result": {k: ("（PNG）" if k == "figure_png" else v) for k, v in result.items()},
     }
     with open(CALLS_LOG, "a") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -140,6 +192,13 @@ class Handler(BaseHTTPRequestHandler):
             result = call_claude(
                 body["prompt"], body.get("image_base64"), body["schema"]
             )
+            # 模型覺得畫圖有幫助時會多回一段 matplotlib 程式：這裡跑成圖一起回去，
+            # app 只拿到 PNG，不用知道怎麼畫
+            code = result.pop("figure", None)
+            if isinstance(code, str) and code.strip():
+                png = render_figure(code)
+                if png:
+                    result["figure_png"] = png
             record_call(
                 body["prompt"], bool(body.get("image_base64")), result,
                 time.monotonic() - started,

@@ -224,38 +224,40 @@ struct StructuredLine: View {
 	@ViewBuilder
 	var body: some View {
 		if line.hasPrefix("## ") {
-			MathText(text: String(line.dropFirst(3)), font: .subheadline.weight(.semibold), size: 15)
+			MathText(text: String(line.dropFirst(3)), font: .headline, size: 17)
 				.padding(.top, 6)
 		} else if line.hasPrefix("$$"), line.hasSuffix("$$"), line.count >= 4 {
 			let latex = line.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces)
 			// 獨立式子畫成一張圖、寬度不夠就整張等比縮小 —— 視窗窄的時候不會被切掉。
-			// 只縮不放大（maxWidth 鎖在原尺寸），畫不出來退回行內那套原樣顯示
-			if let image = MathText.displayImage(latex, size: 18) {
+			// 只縮不放大：maxWidth／maxHeight 都鎖在原尺寸。高度一定要給，不然式子比欄寬長時
+			// SwiftUI 拿不到高度提案，會把它縮成一小點（8/22 第三步那條）。畫不出來退回行內那套
+			if let image = MathText.displayImage(latex, size: 22) {
 				Image(uiImage: image)
 					.resizable()
 					.scaledToFit()
-					.frame(maxWidth: image.size.width)
+					.frame(maxWidth: image.size.width, maxHeight: image.size.height)
 					.frame(maxWidth: .infinity, alignment: .center)
-					.padding(.vertical, 2)
+					.padding(.vertical, 4)
 			} else {
-				MathText(text: "$\(latex)$", font: .callout, size: 18)
+				MathText(text: "$\(latex)$", font: .body, size: 22)
 					.frame(maxWidth: .infinity, alignment: .center)
 			}
 		} else if line.hasPrefix("- ") {
 			HStack(alignment: .firstTextBaseline, spacing: 8) {
 				Text("•").foregroundStyle(.secondary)
-				MathText(text: String(line.dropFirst(2)), font: .callout, size: 16)
+				MathText(text: String(line.dropFirst(2)), font: .body, size: 17)
 			}
 			.padding(.leading, 4)
 		} else if line.hasPrefix("關鍵是：") || line.hasPrefix("關鍵是:") {
-			MathText(text: line, font: .callout.weight(.semibold), size: 16)
+			MathText(text: line, font: .body.weight(.semibold), size: 17)
 				.padding(10)
 				.frame(maxWidth: .infinity, alignment: .leading)
 				.background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
 				.padding(.top, 4)
 		} else {
-			MathText(text: line, font: .callout, size: 16)
-				.foregroundStyle(.primary.opacity(0.85))
+			// 粗體標題行也走這裡（MathText 自己認 **），字級跟內文一樣但粗
+			MathText(text: line, font: .body, size: 17)
+				.foregroundStyle(.primary.opacity(0.9))
 		}
 	}
 }
