@@ -305,7 +305,7 @@ struct CardTreeView: View {
 	/// 點某一塊＝接下來的問題針對那一塊問，模型就對著它答，不用它猜你想問什麼。
 	/// 區塊裡每一行各自渲染：**粗體標題**、$$ 獨立式子、一般解說句
 	private func stepBody(_ text: String, of cardID: UUID) -> some View {
-		let blocks = Self.blocks(of: text)
+		let blocks = StructuredBody.blocks(of: text)
 		return VStack(alignment: .leading, spacing: 12) {
 			ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
 				let focused = stepFocus?.cardID == cardID && stepFocus?.number == index + 1
@@ -313,7 +313,7 @@ struct CardTreeView: View {
 					if focused {
 						stepFocus = nil
 					} else {
-						stepFocus = (cardID, index + 1, Self.headline(of: block))
+						stepFocus = (cardID, index + 1, StructuredBody.headline(of: block))
 						attachID = cardID
 					}
 				} label: {
@@ -326,7 +326,7 @@ struct CardTreeView: View {
 								focused ? Color.accentColor : Color(.tertiarySystemFill), in: Circle())
 						VStack(alignment: .leading, spacing: 6) {
 							ForEach(Array(block.enumerated()), id: \.offset) { _, line in
-								structuredLine(line)
+								StructuredLine(line)
 							}
 						}
 					}
@@ -335,91 +335,6 @@ struct CardTreeView: View {
 				}
 				.buttonStyle(.plain)
 			}
-		}
-	}
-
-	/// 空行隔開的是一塊。沒有空行、也沒有版面記號的舊資料（一步一行那版）退回一行一塊。
-	/// 模型常在粗體標題後多空一行、或把 $$ 式子單獨隔開 —— 那樣一塊會裂成兩三個編號，
-	/// 所以「只有標題的塊」往下併、「只有式子的塊」往上併，一個標題帶它底下的內容才算一塊
-	static func blocks(of text: String) -> [[String]] {
-		var blocks: [[String]] = []
-		var current: [String] = []
-		for raw in text.components(separatedBy: "\n") {
-			let line = raw.trimmingCharacters(in: .whitespaces)
-			if line.isEmpty {
-				if !current.isEmpty { blocks.append(current); current = [] }
-			} else {
-				current.append(line)
-			}
-		}
-		if !current.isEmpty { blocks.append(current) }
-		blocks = blocks.reduce(into: []) { merged, block in
-			let hasTitle = block.first.map(isTitle) ?? false
-			let mathOnly = block.allSatisfy { $0.hasPrefix("$$") }
-			let lastIsTitleOnly = merged.last.map { $0.count == 1 && isTitle($0[0]) } ?? false
-			if !merged.isEmpty, !hasTitle, mathOnly || lastIsTitleOnly {
-				merged[merged.count - 1] += block
-			} else {
-				merged.append(block)
-			}
-		}
-		let structured = blocks.contains { block in
-			block.contains { $0.hasPrefix("**") || $0.hasPrefix("$$") || $0.hasPrefix("## ") || $0.hasPrefix("- ") }
-		}
-		if blocks.count == 1, !structured, blocks[0].count > 1 {
-			return blocks[0].map { [$0] }
-		}
-		return blocks
-	}
-
-	private static func isTitle(_ line: String) -> Bool {
-		line.hasPrefix("## ") || (line.hasPrefix("**") && line.hasSuffix("**") && line.count > 4)
-	}
-
-	/// 針對某一塊發問時帶給模型的那句：拿標題行，去掉粗體／小標記號
-	private static func headline(of block: [String]) -> String {
-		let first = block.first ?? ""
-		var text = first.hasPrefix("## ") ? String(first.dropFirst(3)) : first
-		text = text.replacingOccurrences(of: "**", with: "")
-		return text.trimmingCharacters(in: .whitespaces)
-	}
-
-	/// 講義體的一行：## 小標、$$ 獨立式子、- 條列、關鍵是：結尾，其餘是一般句子
-	@ViewBuilder
-	private func structuredLine(_ line: String) -> some View {
-		if line.hasPrefix("## ") {
-			MathText(text: String(line.dropFirst(3)), font: .subheadline.weight(.semibold), size: 15)
-				.padding(.top, 6)
-		} else if line.hasPrefix("$$"), line.hasSuffix("$$"), line.count >= 4 {
-			let latex = line.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces)
-			// 獨立式子畫成一張圖、寬度不夠就整張等比縮小 —— 視窗窄的時候不會被切掉。
-			// 只縮不放大（maxWidth 鎖在原尺寸），畫不出來退回行內那套原樣顯示
-			if let image = MathText.displayImage(latex, size: 18) {
-				Image(uiImage: image)
-					.resizable()
-					.scaledToFit()
-					.frame(maxWidth: image.size.width)
-					.frame(maxWidth: .infinity, alignment: .center)
-					.padding(.vertical, 2)
-			} else {
-				MathText(text: "$\(latex)$", font: .callout, size: 18)
-					.frame(maxWidth: .infinity, alignment: .center)
-			}
-		} else if line.hasPrefix("- ") {
-			HStack(alignment: .firstTextBaseline, spacing: 8) {
-				Text("•").foregroundStyle(.secondary)
-				MathText(text: String(line.dropFirst(2)), font: .callout, size: 16)
-			}
-			.padding(.leading, 4)
-		} else if line.hasPrefix("關鍵是：") || line.hasPrefix("關鍵是:") {
-			MathText(text: line, font: .callout.weight(.semibold), size: 16)
-				.padding(10)
-				.frame(maxWidth: .infinity, alignment: .leading)
-				.background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-				.padding(.top, 4)
-		} else {
-			MathText(text: line, font: .callout, size: 16)
-				.foregroundStyle(.primary.opacity(0.85))
 		}
 	}
 

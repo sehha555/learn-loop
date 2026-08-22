@@ -206,8 +206,7 @@ struct ConceptPageView: View {
 								.multilineTextAlignment(.leading)
 						}
 						if let body = tree.body {
-							MathText(text: body, font: .callout, size: 15)
-								.foregroundStyle(.primary.opacity(0.85))
+							structuredBody(body)
 								.padding(.leading, 16)
 						}
 						Text("問的 · \(tree.children.count) 個點")
@@ -235,6 +234,15 @@ struct ConceptPageView: View {
 		}
 	}
 
+	/// 問過的內容跟樹頁同一套畫法：## 小標、$$ 獨立式子、粗體標題都認，不會整段變原始碼
+	private func structuredBody(_ text: String) -> some View {
+		VStack(alignment: .leading, spacing: 6) {
+			ForEach(Array(StructuredBody.blocks(of: text).joined().enumerated()), id: \.offset) { _, line in
+				StructuredLine(line)
+			}
+		}
+	}
+
 	private func noteCard(_ question: Card, source: Card?) -> some View {
 		VStack(alignment: .leading, spacing: 6) {
 			HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -250,11 +258,8 @@ struct ConceptPageView: View {
 					.padding(.leading, 16)
 			}
 			if let body = question.body {
-				ForEach(Array(body.split(separator: "\n").enumerated()), id: \.offset) { _, line in
-					MathText(text: String(line), font: .callout, size: 15)
-						.foregroundStyle(.primary.opacity(0.85))
-				}
-				.padding(.leading, 16)
+				structuredBody(body)
+					.padding(.leading, 16)
 			}
 			if !question.children.isEmpty {
 				Text("底下還有 \(question.children.count) 個追問")
