@@ -149,6 +149,8 @@ class Handler(BaseHTTPRequestHandler):
             # iPad 等不及先掛斷了（取消、逾時或連線斷掉），結果送不出去
             print(f"  ↳ 算完了但 iPad 已斷線，耗時 {time.monotonic() - started:.0f} 秒")
         except Exception as error:  # 失敗一律回 500，app 端會自動退回 Gemini
+            # 原因印出來：之前只回給 iPad，log 裡只剩一行 500，事後查不到為什麼
+            print(f"  ↳ 失敗（{time.monotonic() - started:.0f} 秒）：{str(error)[:300]}", flush=True)
             self._respond(500, {"error": str(error)})
         else:
             print(f"  ↳ claude 耗時 {time.monotonic() - started:.0f} 秒")
