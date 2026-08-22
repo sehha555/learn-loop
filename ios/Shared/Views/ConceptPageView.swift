@@ -32,6 +32,8 @@ struct ConceptPageView: View {
 
 	/// 整理頁進行中的請求。存 Task 是為了讓「取消」真的能中斷
 	@State private var compiling: Task<Void, Never>?
+	/// 整理裡收起來的區塊（說明／重點／…）。點標題切換；只記這一次開頁
+	@State private var foldedBlocks: Set<String> = []
 	@State private var errorText: String?
 
 	var body: some View {
@@ -149,13 +151,26 @@ struct ConceptPageView: View {
 	}
 
 	private func wikiBlock(_ title: String, lines: [String]) -> some View {
-		VStack(alignment: .leading, spacing: 4) {
-			Text(title)
-				.font(.caption.weight(.semibold))
+		let folded = foldedBlocks.contains(title)
+		return VStack(alignment: .leading, spacing: 4) {
+			Button {
+				if folded { foldedBlocks.remove(title) } else { foldedBlocks.insert(title) }
+			} label: {
+				HStack(spacing: 4) {
+					Image(systemName: folded ? "chevron.right" : "chevron.down")
+						.font(.caption2.weight(.semibold))
+					Text(title)
+						.font(.caption.weight(.semibold))
+				}
 				.foregroundStyle(.secondary)
-			ForEach(Array(lines.filter { !$0.isEmpty }.enumerated()), id: \.offset) { _, line in
-				MathText(text: line, font: .callout, size: 15)
-					.foregroundStyle(.primary.opacity(0.9))
+				.contentShape(Rectangle())
+			}
+			.buttonStyle(.plain)
+			if !folded {
+				ForEach(Array(lines.filter { !$0.isEmpty }.enumerated()), id: \.offset) { _, line in
+					MathText(text: line, font: .callout, size: 15)
+						.foregroundStyle(.primary.opacity(0.9))
+				}
 			}
 		}
 	}
