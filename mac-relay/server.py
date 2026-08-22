@@ -131,6 +131,9 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(404, {"error": "not found"})
             return
         started = time.monotonic()
+        # 開始就印一行：標準 log 是回應完才寫，看 log 尾巴會以為沒人在算，
+        # 8/22 就這樣在使用者等答案時裝了新版 app 把連線砍掉
+        print(f"{self.log_date_time_string()} {self.client_address[0]} POST /call 開始", flush=True)
         try:
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length))
