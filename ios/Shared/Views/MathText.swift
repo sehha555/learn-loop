@@ -19,11 +19,28 @@ struct MathText: View {
 			.fixedSize(horizontal: false, vertical: true)
 	}
 
+	/// 先照 **…** 切粗體、再在每段裡切數學式 —— 反過來的話「**求 $f_x$**」會被 $ 切開，
+	/// 兩邊各剩一個落單的 ** 就認不出粗體。成對的才加粗，落單的星號原樣保留
 	private var content: Text {
-		Self.segments(of: text).reduce(Text(verbatim: "")) { acc, segment in
+		let parts = text.components(separatedBy: "**")
+		guard parts.count >= 3 else { return inline(text, bold: false) }
+		return parts.enumerated().reduce(Text(verbatim: "")) { acc, item in
+			let (index, part) = item
+			// 奇數段夾在兩個 ** 之間；最後一段若沒有收尾的 ** 就把星號還回去
+			if index % 2 == 1 {
+				return index == parts.count - 1
+					? acc + inline("**" + part, bold: false)
+					: acc + inline(part, bold: true)
+			}
+			return acc + inline(part, bold: false)
+		}
+	}
+
+	private func inline(_ raw: String, bold: Bool) -> Text {
+		Self.segments(of: raw).reduce(Text(verbatim: "")) { acc, segment in
 			switch segment {
-			case let .plain(raw):
-				return acc + Self.boldAware(raw)
+			case let .plain(piece):
+				return acc + (bold ? Text(verbatim: piece).bold() : Text(verbatim: piece))
 			case let .math(latex):
 				guard let rendered = Self.render(latex, size: size) else {
 					// 式子有語法錯畫不出來時，把原文還回去，不要整段吃掉
@@ -34,22 +51,6 @@ struct MathText: View {
 				return acc + Text("\(Image(uiImage: rendered.image))")
 					.baselineOffset(-rendered.descent)
 			}
-		}
-	}
-
-	/// 「完整解法」口吻會用 **…** 強調。成對的才加粗，落單的星號原樣保留
-	private static func boldAware(_ raw: String) -> Text {
-		let parts = raw.components(separatedBy: "**")
-		guard parts.count >= 3 else { return Text(verbatim: raw) }
-		return parts.enumerated().reduce(Text(verbatim: "")) { acc, item in
-			let (index, part) = item
-			// 奇數段夾在兩個 ** 之間；最後一段若沒有收尾的 ** 就把星號還回去
-			if index % 2 == 1 {
-				return index == parts.count - 1
-					? acc + Text(verbatim: "**" + part)
-					: acc + Text(verbatim: part).bold()
-			}
-			return acc + Text(verbatim: part)
 		}
 	}
 
@@ -142,6 +143,10 @@ enum StructuredBody {
 			let line = raw.trimmingCharacters(in: .whitespaces)
 			if line.isEmpty {
 				if !current.isEmpty { blocks.append(current); current = [] }
+			} else if isTitle(line), !current.isEmpty {
+				// 模型忘了空行、標題直接接在上一塊後面：標題行本身就是新的一塊的開頭
+				blocks.append(current)
+				current = [line]
 			} else {
 				current.append(line)
 			}
@@ -166,11 +171,34 @@ enum StructuredBody {
 		return blocks
 	}
 
-	/// 模型有時把 $$ 放在自己一行、式子夾在中間（LaTeX 慣用寫法）—— 併成一行 $$…$$ 才走得進獨立式子那條
+	/// 模型有時把 $$ 放在自己一行、式子夾在中間（LaTeX 慣用寫法）—— 併成一行 $$…$$ 才走得進獨立式子那條。
+	/// 逐行看、只有整行就是 $$ 的才當開關：用 regex 的話上一個式子的結尾 $$ 會被當成開頭，
+	/// 一路吃到下一個式子，中間的標題全被吞掉（8/22 「交換積分順序」那則就這樣）。
+	/// 另外式子跟句子擠在同一行（「$$…$$ 答案」）就拆開，讓每個獨立式子自己一行置中
 	private static func joinDisplayMath(_ text: String) -> String {
-		text.replacingOccurrences(
-			of: #"\$\$[ \t]*\n([\s\S]*?)\n[ \t]*\$\$"#, with: "\\$\\$$1\\$\\$", options: .regularExpression)
-			.replacingOccurrences(of: #"(\$\$[^\n$]*)\n([^\n$]*\$\$)"#, with: "$1 $2", options: .regularExpression)
+		var out: [String] = []
+		var pending: [String]?
+		for raw in text.components(separatedBy: "\n") {
+			let line = raw.trimmingCharacters(in: .whitespaces)
+			if line == "$$" {
+				if let body = pending {
+					out.append("$$" + body.joined(separator: " ") + "$$")
+					pending = nil
+				} else {
+					pending = []
+				}
+			} else if pending != nil {
+				pending?.append(line)
+			} else {
+				out.append(raw)
+			}
+		}
+		// 開了沒關：原樣還回去，不要吃掉內容
+		if let body = pending { out.append("$$"); out += body }
+		// 只在式子前後真的黏著字的時候才斷行，本來就自己一行的不動（多插空行會讓它裂成獨立的一塊）
+		return out.joined(separator: "\n")
+			.replacingOccurrences(of: #"(?<=\S)[ \t]*(\$\$[^$\n]+\$\$)"#, with: "\n$1", options: .regularExpression)
+			.replacingOccurrences(of: #"(\$\$[^$\n]+\$\$)[ \t]*(?=\S)"#, with: "$1\n", options: .regularExpression)
 	}
 
 	static func isTitle(_ line: String) -> Bool {
