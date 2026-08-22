@@ -81,6 +81,11 @@ struct MathText: View {
 
 	// MARK: - 渲染
 
+	/// 獨立式子（$$）用：整式一張 template 圖，呼叫端自己決定怎麼縮放擺放
+	static func displayImage(_ latex: String, size: CGFloat) -> UIImage? {
+		render(latex, size: size)?.image
+	}
+
 	/// 圖片加上它該沉到基線以下多深。NSCache 只收 class，所以是 NSObject
 	private final class Rendered: NSObject {
 		let image: UIImage

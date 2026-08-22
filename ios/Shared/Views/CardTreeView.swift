@@ -63,7 +63,10 @@ struct CardTreeView: View {
 				.padding()
 			}
 		}
-		.onAppear { style = store.teachingStyle }
+		.onAppear {
+			style = store.teachingStyle
+			autoExpandSteps()
+		}
 		.sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
 			editSheet
 		}
@@ -335,7 +338,9 @@ struct CardTreeView: View {
 		}
 	}
 
-	/// 空行隔開的是一塊。沒有空行、也沒有版面記號的舊資料（一步一行那版）退回一行一塊
+	/// 空行隔開的是一塊。沒有空行、也沒有版面記號的舊資料（一步一行那版）退回一行一塊。
+	/// 模型常在粗體標題後多空一行、或把 $$ 式子單獨隔開 —— 那樣一塊會裂成兩三個編號，
+	/// 所以「只有標題的塊」往下併、「只有式子的塊」往上併，一個標題帶它底下的內容才算一塊
 	static func blocks(of text: String) -> [[String]] {
 		var blocks: [[String]] = []
 		var current: [String] = []
@@ -348,6 +353,16 @@ struct CardTreeView: View {
 			}
 		}
 		if !current.isEmpty { blocks.append(current) }
+		blocks = blocks.reduce(into: []) { merged, block in
+			let hasTitle = block.first.map(isTitle) ?? false
+			let mathOnly = block.allSatisfy { $0.hasPrefix("$$") }
+			let lastIsTitleOnly = merged.last.map { $0.count == 1 && isTitle($0[0]) } ?? false
+			if !merged.isEmpty, !hasTitle, mathOnly || lastIsTitleOnly {
+				merged[merged.count - 1] += block
+			} else {
+				merged.append(block)
+			}
+		}
 		let structured = blocks.contains { block in
 			block.contains { $0.hasPrefix("**") || $0.hasPrefix("$$") || $0.hasPrefix("## ") || $0.hasPrefix("- ") }
 		}
@@ -355,6 +370,10 @@ struct CardTreeView: View {
 			return blocks[0].map { [$0] }
 		}
 		return blocks
+	}
+
+	private static func isTitle(_ line: String) -> Bool {
+		line.hasPrefix("## ") || (line.hasPrefix("**") && line.hasSuffix("**") && line.count > 4)
 	}
 
 	/// 針對某一塊發問時帶給模型的那句：拿標題行，去掉粗體／小標記號
@@ -372,12 +391,20 @@ struct CardTreeView: View {
 			MathText(text: String(line.dropFirst(3)), font: .subheadline.weight(.semibold), size: 15)
 				.padding(.top, 6)
 		} else if line.hasPrefix("$$"), line.hasSuffix("$$"), line.count >= 4 {
-			MathText(
-				text: "$" + line.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces) + "$",
-				font: .callout, size: 18
-			)
-			.frame(maxWidth: .infinity, alignment: .center)
-			.padding(.vertical, 2)
+			let latex = line.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces)
+			// 獨立式子畫成一張圖、寬度不夠就整張等比縮小 —— 視窗窄的時候不會被切掉。
+			// 只縮不放大（maxWidth 鎖在原尺寸），畫不出來退回行內那套原樣顯示
+			if let image = MathText.displayImage(latex, size: 18) {
+				Image(uiImage: image)
+					.resizable()
+					.scaledToFit()
+					.frame(maxWidth: image.size.width)
+					.frame(maxWidth: .infinity, alignment: .center)
+					.padding(.vertical, 2)
+			} else {
+				MathText(text: "$\(latex)$", font: .callout, size: 18)
+					.frame(maxWidth: .infinity, alignment: .center)
+			}
 		} else if line.hasPrefix("- ") {
 			HStack(alignment: .firstTextBaseline, spacing: 8) {
 				Text("•").foregroundStyle(.secondary)
@@ -539,6 +566,20 @@ struct CardTreeView: View {
 
 	private func start(expanding card: Card, imageJPEG: Data? = nil) {
 		running[card.id] = Task { await expand(card, imageJPEG: imageJPEG) }
+	}
+
+	/// 「直接給做法」＝貼上去就把每一步算好攤開，不用一步步點。只管題目的解題步驟；
+	/// 一步一步排隊叫（中繼站一次只開一個 claude），點任一步的「取消」整串停
+	private func autoExpandSteps() {
+		guard store.teachingStyle == .direct, let topic, topic.kind == .topic else { return }
+		let pending = topic.children.filter { $0.kind == .step && !$0.isExpanded && running[$0.id] == nil }
+		guard !pending.isEmpty else { return }
+		let task = Task { @MainActor in
+			for step in pending where !Task.isCancelled {
+				await expand(step)
+			}
+		}
+		for step in pending { running[step.id] = task }
 	}
 
 	private func conceptChoices(for topic: Card) -> [String] {
