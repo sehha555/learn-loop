@@ -1,0 +1,1 @@
+../../../../ios/Shared/Views/LatexNormalize.swift

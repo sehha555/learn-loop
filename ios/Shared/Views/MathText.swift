@@ -111,16 +111,7 @@ struct MathText: View {
 	private static func render(_ latex: String, size: CGFloat) -> Rendered? {
 		let key = "\(size)|\(latex)" as NSString
 		if let hit = cache.object(forKey: key) { return hit }
-		// SwiftMath 不認得 \dfrac 這類排版變體，會整式畫不出來 ——
-		// prompt 有叮嚀只用基本款，但模型還是會吐，這裡兜底降級
-		let normalized = latex
-			.replacingOccurrences(of: "\\dfrac", with: "\\frac")
-			.replacingOccurrences(of: "\\tfrac", with: "\\frac")
-			// \boxed 去框留內容；\Big[ 這類大括號變體去掉前綴留括號本身
-			.replacingOccurrences(of: "\\boxed{", with: "{")
-			.replacingOccurrences(of: "\\\\[Bb]igg?", with: "", options: .regularExpression)
-			// \le、\ge、\ne 這三個短寫 SwiftMath 不一定認，補成 \leq、\geq、\neq（後面接字母的不動）
-			.replacingOccurrences(of: "\\\\(le|ge|ne)(?![A-Za-z])", with: "\\\\$1q", options: .regularExpression)
+		let normalized = LatexNormalize.apply(latex)
 		var math = MathImage(
 			latex: normalized, fontSize: size, textColor: .black,
 			labelMode: .text, textAlignment: .left
