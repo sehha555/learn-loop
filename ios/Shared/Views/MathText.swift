@@ -85,9 +85,12 @@ struct MathText: View {
 
 	// MARK: - 渲染
 
-	/// 獨立式子（$$）用：整式一張 template 圖，呼叫端自己決定怎麼縮放擺放
-	static func displayImage(_ latex: String, size: CGFloat) -> UIImage? {
-		render(latex, size: size)?.image
+	/// 獨立式子（$$）用：整式一張 template 圖。比 maxWidth 寬就把字級等比縮小重畫（最小 14pt）
+	static func displayImage(_ latex: String, size: CGFloat, maxWidth: CGFloat) -> UIImage? {
+		guard let first = render(latex, size: size)?.image else { return nil }
+		guard first.size.width > maxWidth else { return first }
+		let shrunk = max(14, (size * maxWidth / first.size.width).rounded(.down))
+		return render(latex, size: shrunk)?.image ?? first
 	}
 
 	/// 圖片加上它該沉到基線以下多深。NSCache 只收 class，所以是 NSObject
@@ -228,16 +231,16 @@ struct StructuredLine: View {
 				.padding(.top, 6)
 		} else if line.hasPrefix("$$"), line.hasSuffix("$$"), line.count >= 4 {
 			let latex = line.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces)
-			// 獨立式子畫成一張圖、寬度不夠就整張等比縮小 —— 視窗窄的時候不會被切掉。
-			// 只縮不放大：maxWidth／maxHeight 都鎖在原尺寸。高度一定要給，不然式子比欄寬長時
-			// SwiftUI 拿不到高度提案，會把它縮成一小點（8/22 第三步那條）。畫不出來退回行內那套
-			if let image = MathText.displayImage(latex, size: 22) {
-				Image(uiImage: image)
-					.resizable()
-					.scaledToFit()
-					.frame(maxWidth: image.size.width, maxHeight: image.size.height)
-					.frame(maxWidth: .infinity, alignment: .center)
-					.padding(.vertical, 4)
+			// 獨立式子：照原尺寸畫（不用 resizable —— 它在這個版面裡一下縮成一點、一下整張消失，
+			// 8/22 踩了兩次）。太長的先把字級縮到 600pt 內，還是比欄寬就橫向捲，不會被切也不會空白。
+			// 畫不出來退回行內那套原樣顯示
+			if let image = MathText.displayImage(latex, size: 22, maxWidth: 600) {
+				ScrollView(.horizontal, showsIndicators: false) {
+					Image(uiImage: image)
+						.padding(.horizontal, 4)
+				}
+				.frame(maxWidth: .infinity, alignment: .center)
+				.padding(.vertical, 4)
 			} else {
 				MathText(text: "$\(latex)$", font: .body, size: 22)
 					.frame(maxWidth: .infinity, alignment: .center)
