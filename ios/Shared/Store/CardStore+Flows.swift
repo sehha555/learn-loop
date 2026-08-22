@@ -108,5 +108,6 @@ extension CardStore {
 			: (text.isEmpty ? result.title : text)
 		tree.fallbackNote = result.fallbackNote
 		tree.asked = text.isEmpty ? nil : text
+		tree.stuckStep = result.isProblem ? result.stuckStep : nil
 	}
 }

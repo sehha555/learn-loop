@@ -65,6 +65,9 @@ struct Card: Identifiable, Codable, Hashable {
 	var fallbackNote: String?
 	/// 他送進來時打的字（只貼圖沒打字就 nil）。只有樹根有；改問題重送時顯示、重生時重送
 	var asked: String?
+	/// 判題時模型看他寫到哪：第幾個解題步驟開始出錯或停下（1 起算）。前面的步驟標「已經對了」、
+	/// 直接給做法時從這步開始自動展開。nil = 舊資料或不是題目；0 = 全對
+	var stuckStep: Int?
 
 	init(
 		id: UUID = UUID(),
@@ -116,6 +119,7 @@ struct Card: Identifiable, Codable, Hashable {
 		noteConcept = try container.decodeIfPresent(String.self, forKey: .noteConcept)
 		fallbackNote = try container.decodeIfPresent(String.self, forKey: .fallbackNote)
 		asked = try container.decodeIfPresent(String.self, forKey: .asked)
+		stuckStep = try container.decodeIfPresent(Int.self, forKey: .stuckStep)
 	}
 
 	var isExpanded: Bool { body != nil }

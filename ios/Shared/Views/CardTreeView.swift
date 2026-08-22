@@ -370,6 +370,12 @@ struct CardTreeView: View {
 				)
 				.foregroundStyle(card.isExpanded ? .primary : .secondary)
 				.multilineTextAlignment(.leading)
+				if let topic, card.kind == .step, !card.isExpanded, alreadyCorrect(card, in: topic) {
+					Label("你這步已經對了", systemImage: "checkmark")
+						.font(.caption)
+						.foregroundStyle(.green)
+						.labelStyle(.titleAndIcon)
+				}
 				Spacer(minLength: 0)
 				if running[card.id] != nil {
 					// 再點一下就是取消 —— 寫出來，不然沒人知道可以按
@@ -493,18 +499,23 @@ struct CardTreeView: View {
 		running[card.id] = Task { await expand(card, imageJPEG: imageJPEG) }
 	}
 
-	/// 「直接給做法」＝貼上去就把每一步算好攤開，不用一步步點。只管題目的解題步驟；
-	/// 一步一步排隊叫（中繼站一次只開一個 claude），點任一步的「取消」整串停
+	/// 「直接給做法」＝貼上去就把解題步驟算好攤開，不用一步步點。只管題目的步驟；
+	/// 他已經做對的（卡住那步之前的）不展開，從卡住那步起全部同時叫 ——
+	/// 中繼站可以同時跑好幾個 claude，等的時間是最慢那一步而不是全部相加
 	private func autoExpandSteps() {
 		guard store.teachingStyle == .direct, let topic, topic.kind == .topic else { return }
-		let pending = topic.children.filter { $0.kind == .step && !$0.isExpanded && running[$0.id] == nil }
-		guard !pending.isEmpty else { return }
-		let task = Task { @MainActor in
-			for step in pending where !Task.isCancelled {
-				await expand(step)
-			}
+		for step in topic.children.filter({ $0.kind == .step })
+		where !step.isExpanded && running[step.id] == nil && !alreadyCorrect(step, in: topic) {
+			start(expanding: step)
 		}
-		for step in pending { running[step.id] = task }
+	}
+
+	/// 這一步排在他卡住那步之前＝他自己做對了
+	private func alreadyCorrect(_ step: Card, in topic: Card) -> Bool {
+		guard let stuck = topic.stuckStep, stuck > 1,
+			let index = topic.children.filter({ $0.kind == .step }).firstIndex(where: { $0.id == step.id })
+		else { return false }
+		return index + 1 < stuck
 	}
 
 	private func conceptChoices(for topic: Card) -> [String] {

@@ -131,10 +131,13 @@ struct AIClient {
 		/// concepts 共同屬於的章（整章的大詞）。概念總覽靠它分層
 		let chapter: String
 		let points: [Point]
+		/// 他從第幾步開始出錯或停下（1 起算，對應 points 裡的 step）。0 或 nil = 沒有這個資訊／全對
+		let stuckStep: Int?
 
 		enum CodingKeys: String, CodingKey {
 			case title, situation, status, transcript, problem, concepts, chapter, points
 			case isProblem = "is_problem"
+			case stuckStep = "stuck_step"
 		}
 
 		/// 寬容政策收在 wire 邊界：轉不出來、或根本不是題目，就是 nil
@@ -199,6 +202,9 @@ struct AIClient {
 		  （不是猜他想問什麼，是這題真的要走的路）。title 是這一步要做什麼，一句話。
 		  視情況再補 0 到 2 個 kind="supplement"（這題沒寫到但接得上）/
 		  "trap"（這裡常見錯）/ "extend"（更難或更一般的版本），沒有就不要硬湊。
+		- stuck_step：對照他寫的過程，points 裡第幾個 step 是他開始出錯或停下來的（1 起算），
+		  前面的步驟他已經做對、不用再講。blank（還沒動筆）給 1；done 且全對給 0；
+		  沒有圖或看不出來給 1。
 
 		B. is_problem 為 false（他在問東西）：
 		\(style.askStatusRule)
@@ -279,6 +285,7 @@ struct AIClient {
 				"type": "array",
 				"items": pointSchema(kinds: ["step", "question", "supplement", "trap", "extend"]),
 			],
+			"stuck_step": ["type": "integer"],
 		]
 		var required = [
 			"title", "is_problem", "situation", "status", "problem", "concepts", "chapter", "points",
