@@ -27,6 +27,8 @@ PORT = 8787
 CALLS_LOG = os.path.expanduser("~/Library/Logs/learn-loop-calls.jsonl")
 # claude 一次呼叫含思考可能要一兩分鐘，比照 app 端的等待上限
 CLAUDE_TIMEOUT = 180
+# 讀整份講義（幾十頁 PDF）再整理，比一題久得多
+FILES_TIMEOUT = 540
 # 畫圖用的 python（裝了 matplotlib 的獨立 venv，不碰系統 python）。
 # 建法：python3 -m venv "$FIGURE_PYTHON 的上兩層" && .../bin/python -m pip install matplotlib
 FIGURE_PYTHON = os.path.expanduser("~/Library/Application Support/learn-loop/venv/bin/python")
@@ -86,16 +88,32 @@ def result_envelope(stdout: str) -> dict:
     raise RuntimeError(f"claude 沒回 result 物件：{stdout[:300]}")
 
 
-def call_claude(prompt: str, image_b64: str | None, schema: dict) -> dict:
+def call_claude(prompt: str, image_b64: str | None, schema: dict, files: list | None = None) -> dict:
     # 圖片落地成暫存檔讓 claude 用 Read 讀。放進獨立目錄並把它當工作目錄，
     # headless 模式下讀工作目錄內的檔案不會卡權限確認
     workdir = tempfile.mkdtemp(prefix="learn-loop-relay-")
+    timeout = CLAUDE_TIMEOUT
     try:
         if image_b64:
             img_path = os.path.join(workdir, "input.jpg")
             with open(img_path, "wb") as f:
                 f.write(base64.b64decode(image_b64))
             prompt = f"先用 Read 工具讀這張圖：{img_path}\n\n{prompt}"
+        if files:
+            # 考試範圍的講義／作業：PDF 或圖，整份讀完才整理。檔名照原樣（模型要在回答裡引用「作業5」）
+            paths = []
+            for item in files:
+                safe = os.path.basename(item["name"]).replace("/", "_") or "file"
+                path = os.path.join(workdir, safe)
+                with open(path, "wb") as f:
+                    f.write(base64.b64decode(item["base64"]))
+                paths.append(path)
+            listing = "\n".join(paths)
+            prompt = (
+                "先用 Read 工具把下面每個檔案全部讀完（PDF 超過 10 頁要分段指定 pages 讀，一頁都不要漏）：\n"
+                f"{listing}\n\n{prompt}"
+            )
+            timeout = FILES_TIMEOUT
 
         prompt += (
             "\n\n輸出規則：只輸出一個符合下面 JSON Schema 的 JSON 物件，"
@@ -108,7 +126,7 @@ def call_claude(prompt: str, image_b64: str | None, schema: dict) -> dict:
             ["claude", "-p", prompt, "--model", "sonnet", "--output-format", "json"],
             capture_output=True,
             text=True,
-            timeout=CLAUDE_TIMEOUT,
+            timeout=timeout,
             cwd=workdir,
         )
         if out.returncode != 0:
@@ -190,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length))
             result = call_claude(
-                body["prompt"], body.get("image_base64"), body["schema"]
+                body["prompt"], body.get("image_base64"), body["schema"], body.get("files")
             )
             # 模型覺得畫圖有幫助時會多回一段 matplotlib 程式：這裡跑成圖一起回去，
             # app 只拿到 PNG，不用知道怎麼畫
@@ -200,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
                 if png:
                     result["figure_png"] = png
             record_call(
-                body["prompt"], bool(body.get("image_base64")), result,
+                body["prompt"], bool(body.get("image_base64")) or bool(body.get("files")), result,
                 time.monotonic() - started,
             )
             self._respond(200, result)

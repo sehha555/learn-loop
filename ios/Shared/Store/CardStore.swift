@@ -17,6 +17,8 @@ final class CardStore: ObservableObject {
 	@Published internal(set) var chapters: [String: String] = [:]
 	/// 正在改問題重生的樹根。放 store 不放 view：樹頁離開再回來也要看得到轉圈圈
 	@Published internal(set) var reasking: Set<UUID> = []
+	/// 考試：日期、範圍、附檔、整理出的題型。照日期排
+	@Published internal(set) var exams: [Exam] = []
 
 	/// 真正的題目（不含概念知識點、直接問的那些樹）。清單、統計、病歷卡的題目紀錄都看這個
 	var problems: [Card] { topics.filter { $0.kind != .note && $0.kind != .free } }
@@ -32,7 +34,10 @@ final class CardStore: ObservableObject {
 	private let fileURL: URL
 	let wikiURL: URL
 	let chaptersURL: URL
+	let examsURL: URL
 	let imagesDir: URL
+	/// 考試附檔（講義／作業 PDF、圖）
+	let materialsDir: URL
 	private let defaults: UserDefaults
 
 	init() {
@@ -44,13 +49,18 @@ final class CardStore: ObservableObject {
 		fileURL = dir.appendingPathComponent("topics.json")
 		wikiURL = dir.appendingPathComponent("wiki.json")
 		chaptersURL = dir.appendingPathComponent("chapters.json")
+		examsURL = dir.appendingPathComponent("exams.json")
 		imagesDir = dir.appendingPathComponent("images", isDirectory: true)
+		materialsDir = dir.appendingPathComponent("materials", isDirectory: true)
 		try? FileManager.default.createDirectory(
 			at: imagesDir, withIntermediateDirectories: true)
+		try? FileManager.default.createDirectory(
+			at: materialsDir, withIntermediateDirectories: true)
 		defaults = UserDefaults(suiteName: Self.appGroupID) ?? .standard
 		load()
 		loadWiki()
 		loadChapters()
+		loadExams()
 	}
 
 	// MARK: - API key

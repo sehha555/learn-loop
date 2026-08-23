@@ -30,6 +30,8 @@ struct LearnLoopApp: App {
 					.tabItem { Label("題目", systemImage: "list.bullet") }
 				AskTabView(store: store)
 					.tabItem { Label("概念", systemImage: "tag") }
+				ExamListView(store: store)
+					.tabItem { Label("考試", systemImage: "calendar") }
 			}
 			// 舊題補抄題目原文，背景跑、跑完清單自己更新
 			.task {

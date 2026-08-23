@@ -7,7 +7,7 @@ extension AIClient {
 	/// prompt 和 schema 原樣丟給 Mac，Mac 那邊叫 claude -p 處理完回 JSON。
 	/// 回應本身就是結果物件，不用再從 provider 的包裝裡挖。
 	func callRelay<T: Decodable>(
-		_ relay: URL, text: String, imageBase64: String?, schema: [String: Any]
+		_ relay: URL, text: String, imageBase64: String?, files: [Attachment] = [], schema: [String: Any]
 	) async throws -> T {
 		// 先敲 /health，2 秒沒回就當 Mac 不在，立刻換路 —— 不讓使用者乾等連線逾時
 		var health = URLRequest(url: relay.appending(path: "health"))
@@ -20,6 +20,11 @@ extension AIClient {
 		request.timeoutInterval = 180
 		var body: [String: Any] = ["prompt": text, "schema": schema]
 		if let imageBase64 { body["image_base64"] = imageBase64 }
+		if !files.isEmpty {
+			// 講義 PDF 幾 MB，讀起來比一張圖久得多
+			request.timeoutInterval = 600
+			body["files"] = files.map { ["name": $0.name, "base64": $0.data.base64EncodedString()] }
+		}
 		request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
 		return try JSONDecoder().decode(T.self, from: try await Self.send(request))
