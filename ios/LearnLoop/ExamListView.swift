@@ -110,11 +110,8 @@ struct ExamDetailView: View {
 		if let exam {
 			Form {
 				Section {
-					TextField("名稱", text: Binding(
-						get: { exam.name }, set: { var e = exam; e.name = $0; store.updateExam(e) }))
-					DatePicker("日期", selection: Binding(
-						get: { exam.date }, set: { var e = exam; e.date = $0; store.updateExam(e) }),
-						displayedComponents: .date)
+					TextField("名稱", text: field(exam, \.name))
+					DatePicker("日期", selection: field(exam, \.date), displayedComponents: .date)
 					LabeledContent("倒數", value: exam.daysLeft < 0 ? "考完了" : "\(exam.daysLeft) 天")
 				}
 
@@ -126,9 +123,9 @@ struct ExamDetailView: View {
 						Toggle(chapter, isOn: Binding(
 							get: { exam.chapters.contains(chapter) },
 							set: { on in
-								var e = exam
-								if on { e.chapters.append(chapter) } else { e.chapters.removeAll { $0 == chapter } }
-								store.updateExam(e)
+								var edited = exam
+								if on { edited.chapters.append(chapter) } else { edited.chapters.removeAll { $0 == chapter } }
+								store.updateExam(edited)
 							}))
 					}
 				}
@@ -210,6 +207,13 @@ struct ExamDetailView: View {
 		} else {
 			Text("這場考試已經刪掉了").foregroundStyle(.secondary)
 		}
+	}
+
+	/// 表單欄位直接綁到 store：改一個欄位就整筆存檔
+	private func field<T>(_ exam: Exam, _ keyPath: WritableKeyPath<Exam, T>) -> Binding<T> {
+		Binding(
+			get: { exam[keyPath: keyPath] },
+			set: { var edited = exam; edited[keyPath: keyPath] = $0; store.updateExam(edited) })
 	}
 
 	private func compile() {

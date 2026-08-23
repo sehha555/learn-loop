@@ -32,11 +32,6 @@ extension CardStore {
 		saveExams()
 	}
 
-	/// 最近一場還沒過的考試，清單頁頂端的倒數用
-	var nextExam: Exam? {
-		exams.first { $0.daysLeft >= 0 }
-	}
-
 	// MARK: 附檔
 
 	func materialURL(exam examID: UUID, file: ExamFile) -> URL {
