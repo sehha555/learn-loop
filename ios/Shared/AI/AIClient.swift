@@ -225,6 +225,7 @@ struct AIClient {
 
 		第五步，problem：is_problem 為 true 時給題目本身那一句（出題者寫的部分），
 		不含題號、不含結尾等號、不含他自己寫的任何算式或過程；題目是他打字給的就照抄他打的。
+		這一欄的數學式一樣用 LaTeX 包 $，不要寫 ∫∫、≤ 這種 unicode 符號。
 		is_problem 為 false 時給空字串。
 
 		最外層的 title 是這一題（或這個問題）的名字，四到八個字。

@@ -155,6 +155,8 @@ extension Card {
 		   stripped.range(of: #"\p{Han}"#, options: .regularExpression) == nil {
 			stripped = "$" + stripped + "$"
 		}
+		// 或整句用 unicode 符號寫假數學（「∫∫_Ω 1/(1+x+y)^2 dA，0≤x≤2」）：換成 LaTeX 再包
+		stripped = LatexNormalize.latexifyPlainMath(stripped)
 		return stripped.isEmpty ? text : stripped
 	}
 
