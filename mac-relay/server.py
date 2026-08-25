@@ -175,6 +175,8 @@ def classify(prompt: str) -> tuple[str, str]:
     title = first[len("題目："):] if first.startswith("題目：") else ""
     if title.startswith("他直接問的問題"):
         return "直接問", "（直接問）"
+    if "這題的解題步驟（判題時列的" in prompt:
+        return "展開全部步驟", title
     if "他現在點開的路徑：" in prompt:
         path = prompt.split("他現在點開的路徑：", 1)[1].split("\n", 1)[0]
         return ("追問" if " → " in path else "展開節點"), title
@@ -209,13 +211,22 @@ def read_log(limit: int) -> list:
     return rows
 
 
+def _mask_png(value):
+    """log 不存圖的 base64（一張幾十 KB），含 steps 裡的"""
+    if isinstance(value, dict):
+        return {k: ("（PNG）" if k == "figure_png" else _mask_png(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_mask_png(v) for v in value]
+    return value
+
+
 def record_call(prompt: str, has_image: bool, result: dict, seconds: float) -> None:
     entry = {
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "has_image": has_image,
         "seconds": round(seconds),
         "prompt": prompt,
-        "result": {k: ("（PNG）" if k == "figure_png" else v) for k, v in result.items()},
+        "result": _mask_png(result),
     }
     with open(CALLS_LOG, "a") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -264,11 +275,14 @@ class Handler(BaseHTTPRequestHandler):
             )
             # 模型覺得畫圖有幫助時會多回一段 matplotlib 程式：這裡跑成圖一起回去，
             # app 只拿到 PNG，不用知道怎麼畫
-            code = result.pop("figure", None)
-            if isinstance(code, str) and code.strip():
-                png = render_figure(code)
-                if png:
-                    result["figure_png"] = png
+            # 整題一次展開的回覆是 steps 陣列，圖掛在各步裡
+            targets = [result] + [s for s in result.get("steps") or [] if isinstance(s, dict)]
+            for target in targets:
+                code = target.pop("figure", None)
+                if isinstance(code, str) and code.strip():
+                    png = render_figure(code)
+                    if png:
+                        target["figure_png"] = png
             record_call(
                 body["prompt"], bool(body.get("image_base64")) or bool(body.get("files")), result,
                 time.monotonic() - started,

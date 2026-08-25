@@ -64,6 +64,7 @@ let calls = [];
 
 function bodyText(result) {
   if (!result || typeof result !== "object") return String(result ?? "");
+  if (Array.isArray(result.steps)) return result.steps.map(s => `【${s.title}】${s.body}`).join("\n\n");
   return result.body || result.status || result.summary || JSON.stringify(result);
 }
 function toTs(t) { return new Date(t.replace(" ", "T")).getTime() / 1000; }
@@ -130,8 +131,9 @@ function render() {
 
 function prettyResult(result) {
   if (!result || typeof result !== "object") return String(result ?? "");
-  const { body, ...rest } = result;
-  return (body ? body + "\n\n" : "") + (Object.keys(rest).length ? "── 其他欄位 ──\n" + JSON.stringify(rest, null, 2) : "");
+  const { body, steps, ...rest } = result;
+  const main = Array.isArray(steps) ? bodyText(result) : body;
+  return (main ? main + "\n\n" : "") + (Object.keys(rest).length ? "── 其他欄位 ──\n" + JSON.stringify(rest, null, 2) : "");
 }
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 

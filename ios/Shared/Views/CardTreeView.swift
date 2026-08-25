@@ -357,6 +357,11 @@ struct CardTreeView: View {
 			} else if card.isExpanded {
 				// 展開過的：點一下收起來，再點打開（落地存檔，離開再回來還記得）
 				store.toggleCollapsed(cardID: card.id)
+			} else if let topic, card.kind == .step, topic.kind == .topic, store.teachingStyle == .direct {
+				// 直接給做法的步驟一律整題一起叫；他點的那步就算排在卡住之前也一起帶上
+				expandSteps(topic.children.filter {
+					$0.kind == .step && ($0.id == card.id || !alreadyCorrect($0, in: topic))
+				})
 			} else {
 				start(expanding: card)
 			}
@@ -500,13 +505,42 @@ struct CardTreeView: View {
 	}
 
 	/// 「直接給做法」＝貼上去就把解題步驟算好攤開，不用一步步點。只管題目的步驟；
-	/// 他已經做對的（卡住那步之前的）不展開，從卡住那步起全部同時叫 ——
-	/// 中繼站可以同時跑好幾個 claude，等的時間是最慢那一步而不是全部相加
+	/// 他已經做對的（卡住那步之前的）不展開，從卡住那步起整題一次叫
 	private func autoExpandSteps() {
 		guard store.teachingStyle == .direct, let topic, topic.kind == .topic else { return }
-		for step in topic.children.filter({ $0.kind == .step })
-		where !step.isExpanded && running[step.id] == nil && !alreadyCorrect(step, in: topic) {
-			start(expanding: step)
+		expandSteps(topic.children.filter { $0.kind == .step && !alreadyCorrect($0, in: topic) })
+	}
+
+	/// 還沒展開、也沒在跑的步驟一起送一次。之前一步一個呼叫平行送，每個都以為自己是第一個、
+	/// 各自從頭解整題（8/25 log 同一題 ×5）；一次叫模型看得到全部步驟，每步只講自己的
+	private func expandSteps(_ candidates: [Card]) {
+		guard let topic else { return }
+		let steps = candidates.filter { !$0.isExpanded && running[$0.id] == nil }
+		guard !steps.isEmpty else { return }
+		let task = Task { await expandBatch(steps, in: topic) }
+		// 每一步都掛同一個 Task：每步都轉圈、任一步按取消就整批取消
+		for step in steps { running[step.id] = task }
+	}
+
+	@MainActor
+	private func expandBatch(_ steps: [Card], in topic: Card) async {
+		defer { for step in steps { running[step.id] = nil } }
+		do {
+			let result = try await store.ai.expandSteps(
+				topic: topicContext(topic), diagnosis: topic.body ?? "",
+				transcript: topic.transcript, steps: steps.map(\.title))
+			for (index, step) in steps.enumerated() {
+				// 對回去：標題一樣的優先，模型改了字就照順序
+				let answer = result.steps.first { $0.title == step.title }
+					?? (index < result.steps.count ? result.steps[index] : nil)
+				guard let answer else { continue }
+				if let figure = answer.figureData { store.saveFigure(figure, for: step.id) }
+				store.expand(cardID: step.id, body: answer.body, fallbackNote: result.fallbackNote)
+			}
+			attachID = steps.last?.id
+		} catch {
+			guard !AIClient.isCancellation(error) else { return }
+			errorText = error.localizedDescription
 		}
 	}
 
