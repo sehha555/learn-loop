@@ -51,10 +51,6 @@ struct ConceptPageView: View {
 		.errorAlert($errorText)
 		.navigationTitle(name)
 		.navigationBarTitleDisplayMode(.inline)
-		// 第一次進來、有材料但還沒整理過：自動整理一次。之後有新材料才靠按鈕
-		.task(id: name) {
-			if store.wiki[name] == nil, store.wikiNewCount(for: name) > 0 { compile() }
-		}
 	}
 
 	// MARK: - 各區塊
