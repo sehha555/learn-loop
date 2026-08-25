@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>learn-loop 呼叫紀錄</title>
+<style>
+  :root { --bg:#f4f6f5; --panel:#fff; --ink:#1a232a; --muted:#66757d; --line:#d3dadd; --accent:#1f7a8c; --warn:#d6455b; --soft:#e4eef0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#11171a; --panel:#182126; --ink:#e4eaed; --muted:#98a7ae; --line:#2c3a41; --accent:#4fb3c6; --warn:#f06a7c; --soft:#1f3238; }
+  }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.55 "PingFang TC","Noto Sans TC",sans-serif }
+  .wrap { max-width:1400px; margin:0 auto; padding:20px }
+  h1 { font-size:18px; margin:0 0 12px }
+  .bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px }
+  .bar input, .bar select { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink) }
+  .bar input[type=search] { min-width:260px }
+  .bar .count { color:var(--muted); margin-left:auto }
+  .bursts { background:var(--panel); border:1px solid var(--warn); border-radius:8px; padding:10px 14px; margin-bottom:14px }
+  .bursts h2 { font-size:14px; margin:0 0 6px; color:var(--warn) }
+  .bursts div { color:var(--muted) }
+  .bursts a { color:var(--accent); cursor:pointer }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top }
+  th { font-size:12px; letter-spacing:.06em; color:var(--muted); font-weight:500 }
+  tr.row { cursor:pointer }
+  tr.row:hover td { background:var(--soft) }
+  tr.row.burst td:first-child { box-shadow:inset 3px 0 var(--warn) }
+  td.t { white-space:nowrap; font-variant-numeric:tabular-nums; color:var(--muted) }
+  td.s { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap }
+  .kind { display:inline-block; padding:1px 7px; border-radius:10px; background:var(--soft); color:var(--accent); font-size:12px; white-space:nowrap }
+  td.p { color:var(--muted); max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  tr.detail td { padding:0; background:var(--bg) }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:0 }
+  .cols > div { padding:12px 14px; min-width:0 }
+  .cols > div + div { border-left:1px solid var(--line) }
+  .cols h3 { margin:0 0 6px; font-size:12px; letter-spacing:.06em; color:var(--muted); font-weight:500 }
+  pre { margin:0; white-space:pre-wrap; word-break:break-word; font:13px/1.5 "SF Mono",Menlo,monospace; max-height:70vh; overflow:auto }
+  .empty { padding:30px; text-align:center; color:var(--muted) }
+  @media (max-width:800px) { .cols { grid-template-columns:1fr } .cols > div + div { border-left:0; border-top:1px solid var(--line) } td.p { display:none } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>learn-loop 呼叫紀錄</h1>
+  <div class="bar">
+    <input type="date" id="date">
+    <select id="kind"><option value="">全部種類</option></select>
+    <input type="search" id="q" placeholder="搜 prompt 或回覆">
+    <label><input type="checkbox" id="onlyBurst"> 只看連發</label>
+    <span class="count" id="count"></span>
+  </div>
+  <div class="bursts" id="bursts" hidden></div>
+  <table>
+    <thead><tr><th>時間</th><th>秒</th><th>種類</th><th>題目</th><th>回覆開頭</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<script>
+// 一次呼叫一列；點列展開左 prompt 右回覆全文。LaTeX 顯示原文，不渲染，調 prompt 看原文才準。
+const BURST_SECONDS = 120; // 同一題、同種類、這段時間內連發 → 標成一組，通常就是重複解釋的來源
+let calls = [];
+
+function bodyText(result) {
+  if (!result || typeof result !== "object") return String(result ?? "");
+  return result.body || result.status || result.summary || JSON.stringify(result);
+}
+function toTs(t) { return new Date(t.replace(" ", "T")).getTime() / 1000; }
+
+// 找連發：同一題＋同種類，前後相隔 BURST_SECONDS 內就串成一組
+function markBursts(rows) {
+  const groups = [];
+  const sorted = [...rows].sort((a, b) => toTs(a.time) - toTs(b.time));
+  let cur = null;
+  for (const r of sorted) {
+    r.burst = null;
+    const key = r.kind + "|" + r.title;
+    if (cur && cur.key === key && toTs(r.time) - toTs(cur.last.time) <= BURST_SECONDS && r.title && r.title !== "（直接問）") {
+      cur.items.push(r); cur.last = r;
+    } else {
+      cur = { key, items: [r], last: r };
+      groups.push(cur);
+    }
+  }
+  const bursts = groups.filter(g => g.items.length >= 2);
+  bursts.forEach((g, i) => g.items.forEach(r => r.burst = i));
+  return bursts;
+}
+
+function render() {
+  const date = document.getElementById("date").value;
+  const kind = document.getElementById("kind").value;
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const onlyBurst = document.getElementById("onlyBurst").checked;
+  const bursts = markBursts(calls);
+  const shown = calls.filter(r =>
+    (!date || r.time.startsWith(date)) &&
+    (!kind || r.kind === kind) &&
+    (!onlyBurst || r.burst !== null) &&
+    (!q || (r.prompt + "\n" + JSON.stringify(r.result)).toLowerCase().includes(q))
+  ).reverse();
+
+  document.getElementById("count").textContent = `${shown.length} / ${calls.length} 筆`;
+
+  const bDiv = document.getElementById("bursts");
+  const shownIds = new Set(shown.map(r => r.id));
+  const visibleBursts = bursts.filter(g => g.items.some(r => shownIds.has(r.id)));
+  bDiv.hidden = visibleBursts.length === 0;
+  bDiv.innerHTML = `<h2>連發（同一題、${BURST_SECONDS} 秒內同種類多次）</h2>` +
+    visibleBursts.map(g => `<div>${g.items[0].time.slice(0, 16)}　${g.key.replace("|", "　")}　×${g.items.length}` +
+      (g.items.length > 1 && new Set(g.items.map(r => r.prompt)).size < g.items.length ? "（含完全相同的 prompt，重複送）" : "") + "</div>").join("");
+
+  const tbody = document.getElementById("rows");
+  tbody.innerHTML = "";
+  if (!shown.length) { tbody.innerHTML = `<tr><td colspan="5" class="empty">沒有符合的紀錄</td></tr>`; return; }
+  for (const r of shown) {
+    const tr = document.createElement("tr");
+    tr.className = "row" + (r.burst !== null ? " burst" : "");
+    tr.innerHTML = `<td class="t">${r.time}</td><td class="s">${r.seconds}${r.has_image ? " 圖" : ""}</td>` +
+      `<td><span class="kind">${r.kind}</span></td><td>${esc(r.title)}</td><td class="p">${esc(bodyText(r.result).slice(0, 80))}</td>`;
+    const detail = document.createElement("tr");
+    detail.className = "detail"; detail.hidden = true;
+    detail.innerHTML = `<td colspan="5"><div class="cols"><div><h3>PROMPT</h3><pre>${esc(r.prompt)}</pre></div>` +
+      `<div><h3>回覆</h3><pre>${esc(prettyResult(r.result))}</pre></div></div></td>`;
+    tr.onclick = () => { detail.hidden = !detail.hidden; };
+    tbody.append(tr, detail);
+  }
+}
+
+function prettyResult(result) {
+  if (!result || typeof result !== "object") return String(result ?? "");
+  const { body, ...rest } = result;
+  return (body ? body + "\n\n" : "") + (Object.keys(rest).length ? "── 其他欄位 ──\n" + JSON.stringify(rest, null, 2) : "");
+}
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+async function load() {
+  const res = await fetch("/log");
+  calls = (await res.json()).calls;
+  const kinds = [...new Set(calls.map(r => r.kind))];
+  const sel = document.getElementById("kind");
+  kinds.forEach(k => { const o = document.createElement("option"); o.value = o.textContent = k; sel.append(o); });
+  render();
+}
+["date", "kind", "q", "onlyBurst"].forEach(id => document.getElementById(id).addEventListener("input", render));
+load();
+</script>
+</body>
+</html>

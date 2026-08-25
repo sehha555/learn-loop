@@ -168,6 +168,47 @@ def render_figure(code: str) -> str | None:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+# 從 prompt 開頭認出這次呼叫是哪一種：app 端沒送種類欄位，log 頁只好自己認
+def classify(prompt: str) -> tuple[str, str]:
+    """回 (種類, 題目名)。"""
+    first = prompt.split("\n", 1)[0]
+    title = first[len("題目："):] if first.startswith("題目：") else ""
+    if title.startswith("他直接問的問題"):
+        return "直接問", "（直接問）"
+    if "他現在點開的路徑：" in prompt:
+        path = prompt.split("他現在點開的路徑：", 1)[1].split("\n", 1)[0]
+        return ("追問" if " → " in path else "展開節點"), title
+    if prompt.startswith("你是坐在旁邊的助教。"):
+        return "判題", ""
+    if prompt.startswith("你是坐在旁邊的助教，"):
+        return "整理概念", ""
+    if prompt.startswith("下面是一個學生累積的概念名"):
+        return "分章", ""
+    if prompt.startswith("附上的檔案"):
+        return "整理範圍", ""
+    return "其他", title
+
+
+def read_log(limit: int) -> list:
+    if not os.path.exists(CALLS_LOG):
+        return []
+    with open(CALLS_LOG) as f:
+        lines = f.readlines()[-limit:]
+    rows = []
+    for i, line in enumerate(lines):
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        kind, title = classify(entry.get("prompt", ""))
+        if not title:
+            result = entry.get("result")
+            title = result.get("title", "") if isinstance(result, dict) else ""
+        entry.update({"id": i, "kind": kind, "title": title})
+        rows.append(entry)
+    return rows
+
+
 def record_call(prompt: str, has_image: bool, result: dict, seconds: float) -> None:
     entry = {
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -193,6 +234,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self._respond(200, {"ok": True})
+        # log 頁：看模型每次收到什麼、回了什麼，拿來調 prompt。瀏覽器開 /log/ui
+        elif self.path.startswith("/log/ui"):
+            with open(os.path.join(os.path.dirname(__file__), "log_ui.html"), "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.startswith("/log"):
+            self._respond(200, {"calls": read_log(500)})
         else:
             self._respond(404, {"error": "not found"})
 
