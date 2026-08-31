@@ -186,6 +186,8 @@ def classify(prompt: str) -> tuple[str, str]:
         return "整理概念", ""
     if prompt.startswith("下面是一個學生累積的概念名"):
         return "分章", ""
+    if prompt.startswith("下面是他累積的全部概念清單"):
+        return "整理概念清單", ""
     if prompt.startswith("附上的檔案"):
         return "整理範圍", ""
     return "其他", title
@@ -278,11 +280,22 @@ class Handler(BaseHTTPRequestHandler):
             # 整題一次展開的回覆是 steps 陣列，圖掛在各步裡
             targets = [result] + [s for s in result.get("steps") or [] if isinstance(s, dict)]
             for target in targets:
-                code = target.pop("figure", None)
-                if isinstance(code, str) and code.strip():
-                    png = render_figure(code)
-                    if png:
-                        target["figure_png"] = png
+                fig = target.get("figure")
+                if isinstance(fig, str):
+                    # 展開／判題：figure 是 matplotlib code 字串，跑成 PNG、code 不回 app
+                    target.pop("figure")
+                    if fig.strip():
+                        png = render_figure(fig)
+                        if png:
+                            target["figure_png"] = png
+                elif isinstance(fig, dict) and fig.get("kind") == "plot":
+                    # 整理概念頁：figure 是 {kind, content}，只有 plot 才跑 code；
+                    # dict 不拿掉——app 要 kind 跟 content。其他 kind 絕不執行內容
+                    code = fig.get("content")
+                    if isinstance(code, str) and code.strip():
+                        png = render_figure(code)
+                        if png:
+                            target["figure_png"] = png
             record_call(
                 body["prompt"], bool(body.get("image_base64")) or bool(body.get("files")), result,
                 time.monotonic() - started,
