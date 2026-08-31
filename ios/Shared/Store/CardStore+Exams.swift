@@ -61,7 +61,8 @@ extension CardStore {
 
 	// MARK: 整理範圍
 
-	/// 把附檔全部送給模型，整理出題型清單存在考試底下。只走 Mac 中繼站（要讀 PDF）
+	/// 把附檔全部送給模型整理會考的題型 —— 題型內容寫進各概念頁的「會怎麼考」，
+	/// 考試底下只記涵蓋哪些概念。只走 Mac 中繼站（要讀 PDF）
 	func compileScope(for examID: UUID) async throws {
 		guard let exam = exams.first(where: { $0.id == examID }), !exam.files.isEmpty else { return }
 		let files = exam.files.compactMap { file -> AIClient.Attachment? in
@@ -69,10 +70,34 @@ extension CardStore {
 			return AIClient.Attachment(name: "\(file.name).\(file.ext)", data: data)
 		}
 		let result = try await ai.compileScope(
-			examName: exam.name, files: files, knownChapters: knownChapters)
+			examName: exam.name, files: files, knownChapters: knownChapters,
+			knownConcepts: knownConceptNames())
 		guard let index = exams.firstIndex(where: { $0.id == examID }) else { return }
+		// 重跑同一場：先把上次寫進各概念頁的第 4 塊清掉
+		for key in wiki.keys {
+			wiki[key]?.examTopics.removeAll { $0.examID == examID }
+		}
+		// 每型寫進它對到的概念頁；沒有頁就先立一頁只有第 4 塊的（講義骨架）
+		var covered: [String] = []
+		for topic in result.topics {
+			let names = topic.concepts
+				.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+				.filter { !$0.isEmpty }
+			for name in names {
+				var page = wiki[name] ?? WikiPage(
+					what: "", figure: nil, links: [], uses: "", examTopics: [],
+					compiledAt: Date(), materialCount: 0, fallbackNote: nil)
+				page.examTopics.append(ExamTopic(
+					name: topic.name, examples: topic.examples, howTo: topic.howTo, examID: examID))
+				wiki[name] = page
+				// 新概念跟著題型的章走；已分章的不動（assignChapter 本來就只填空）
+				assignChapter(topic.chapter, to: [name])
+				if !covered.contains(name) { covered.append(name) }
+			}
+		}
+		saveWiki()
 		exams[index].scope = ExamScope(
-			topics: result.topics, compiledAt: Date(), fallbackNote: result.fallbackNote)
+			concepts: covered, compiledAt: Date(), fallbackNote: result.fallbackNote)
 		// 範圍整理出來的章自動勾上
 		for topic in result.topics where !exams[index].chapters.contains(topic.chapter) && !topic.chapter.isEmpty {
 			exams[index].chapters.append(topic.chapter)

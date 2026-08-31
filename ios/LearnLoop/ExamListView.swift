@@ -17,7 +17,7 @@ struct ExamListView: View {
 						.foregroundStyle(.secondary)
 				}
 				ForEach(store.exams) { exam in
-					NavigationLink(value: exam.id) {
+					NavigationLink(value: ExamRoute(id: exam.id)) {
 						HStack(alignment: .firstTextBaseline) {
 							VStack(alignment: .leading, spacing: 4) {
 								Text(exam.name).font(.headline)
@@ -47,9 +47,12 @@ struct ExamListView: View {
 					Button("加一場", systemImage: "plus") { adding = true }
 				}
 			}
-			.navigationDestination(for: UUID.self) { examID in
-				ExamDetailView(store: store, examID: examID)
+			.navigationDestination(for: ExamRoute.self) { route in
+				ExamDetailView(store: store, examID: route.id)
 			}
+			// 範圍列概念、點進概念頁；概念頁裡的題目連結（UUID）也走這套，
+			// 所以考試自己的路由不能再用裸 UUID —— 包成 ExamRoute
+			.conceptDestinations(store: store)
 			.sheet(isPresented: $adding) {
 				NewExamSheet(store: store)
 			}
@@ -63,6 +66,11 @@ struct ExamListView: View {
 			.font(.subheadline.weight(.semibold))
 			.foregroundStyle(days <= 3 && days >= 0 ? .red : .secondary)
 	}
+}
+
+/// 考試詳情的路由。不能用裸 UUID —— 那個型別被 conceptDestinations 拿去開題目樹了
+private struct ExamRoute: Hashable {
+	let id: UUID
 }
 
 /// 新增：只要名字和日期，其他進去再補
@@ -162,23 +170,19 @@ struct ExamDetailView: View {
 							.disabled(exam.files.isEmpty)
 					}
 					if let scope = exam.scope {
-						ForEach(Array(scope.topics.enumerated()), id: \.offset) { index, topic in
-							VStack(alignment: .leading, spacing: 6) {
-								HStack(alignment: .firstTextBaseline) {
-									Text("\(index + 1). \(topic.name)").font(.headline)
+						if scope.concepts.isEmpty {
+							Text("這是舊版整理的結果——重新整理範圍後，題型會寫進各概念頁、這裡列涵蓋的概念。")
+								.font(.caption).foregroundStyle(.secondary)
+						}
+						ForEach(scope.concepts, id: \.self) { name in
+							NavigationLink(value: name) {
+								HStack {
+									Text(name)
 									Spacer()
-									Text(topic.chapter).font(.caption).foregroundStyle(.secondary)
-								}
-								MathText(text: topic.howTo, font: .callout, size: 16)
-									.foregroundStyle(.primary.opacity(0.85))
-								ForEach(Array(topic.examples.components(separatedBy: "\n").filter { !$0.isEmpty }.enumerated()), id: \.offset) { _, line in
-									HStack(alignment: .firstTextBaseline, spacing: 6) {
-										Text("•").foregroundStyle(.secondary)
-										MathText(text: line, font: .callout, size: 16)
-									}
+									Text(store.chapters[name] ?? "")
+										.font(.caption).foregroundStyle(.secondary)
 								}
 							}
-							.padding(.vertical, 4)
 						}
 						if let note = scope.fallbackNote {
 							Label(note, systemImage: "icloud.and.arrow.down").font(.caption2).foregroundStyle(.orange)
@@ -187,7 +191,9 @@ struct ExamDetailView: View {
 							.font(.caption2).foregroundStyle(.tertiary)
 					}
 				} header: {
-					Text("會考的題型")
+					Text("範圍（概念）")
+				} footer: {
+					Text("點概念看「會怎麼考」——題型、例題、口訣寫在概念頁的第 4 塊。")
 				}
 			}
 			.navigationTitle(exam.name)

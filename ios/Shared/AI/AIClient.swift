@@ -642,7 +642,7 @@ struct AIClient {
 
 	/// 讀考試的附檔，整理出會考的題型清單。只走 Mac 中繼站 —— 雲端那條不收 PDF
 	func compileScope(
-		examName: String, files: [Attachment], knownChapters: [String]
+		examName: String, files: [Attachment], knownChapters: [String], knownConcepts: [String]
 	) async throws -> CompiledScope {
 		guard let relay else { throw AIError.relayOnly("整理範圍") }
 		let prompt = """
@@ -661,6 +661,10 @@ struct AIClient {
 		- examples：講義和作業裡這一型的題目，一行一題、每行不要編號，最多六題，
 		  題目用 LaTeX 寫、前後包 $。作業題在行尾註明（作業5 #4）。講義裡他沒做完、留白的題優先放前面並註明（未做完）。
 		- how_to：這一型怎麼判斷、解法骨幹，一到兩句，像小抄。
+		- concepts：這一型用到的 1 到 2 個概念名，粒度像教科書目錄的小節
+		  （「部分分式拆解」不是「積分」，「變數代換法」不是「積分技巧」）。
+		  他既有的概念有：\(knownConcepts.isEmpty ? "（還沒有）" : knownConcepts.joined(separator: "、"))，
+		  語意相同的務必重用原名、一個字都不要改，都不像才取新名。
 		\(Self.formatRule)
 		"""
 		let schema: [String: Any] = [
@@ -673,8 +677,12 @@ struct AIClient {
 						"properties": [
 							"name": ["type": "string"], "chapter": ["type": "string"],
 							"examples": ["type": "string"], "how_to": ["type": "string"],
+							"concepts": [
+								"type": "array", "items": ["type": "string"],
+								"minItems": 1, "maxItems": 2,
+							],
 						],
-						"required": ["name", "chapter", "examples", "how_to"],
+						"required": ["name", "chapter", "examples", "how_to", "concepts"],
 					],
 				],
 			],

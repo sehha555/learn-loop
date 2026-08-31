@@ -9,7 +9,8 @@ extension CardStore {
 		wiki = decoded
 	}
 
-	private func saveWiki() {
+	/// module 內共用：整理範圍（CardStore+Exams）也會寫 wiki
+	func saveWiki() {
 		guard let data = try? JSONEncoder().encode(wiki) else { return }
 		try? data.write(to: wikiURL, options: .atomic)
 	}

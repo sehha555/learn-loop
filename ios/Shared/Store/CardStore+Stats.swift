@@ -89,7 +89,8 @@ extension CardStore {
 			.prefix(limit * 3 / 5)
 			.map(\.element)
 		let picked = Set(byTrouble)
-		let rest = stats.byTime.filter { !picked.contains($0) }
+		let rest = Self.withSkeleton(stats.byTime, wiki: wiki, chapters: chapters)
+			.filter { !picked.contains($0) }
 		return byTrouble + rest.prefix(limit - byTrouble.count)
 	}
 
@@ -142,10 +143,28 @@ extension CardStore {
 		}
 	}
 
-	/// 全部概念，卡過的排最上面，其次常出現的（同分照筆畫穩定排）
+	/// 全部叫得出名字的概念：題目裡出現過的 ∪ wiki 有頁的 ∪ 分了章的。
+	/// 講義骨架（整理範圍先立的概念頁）還沒有題也算存在——判題、整理、合併都對這份清單
+	func knownConceptNames() -> [String] {
+		Self.withSkeleton(conceptStats().byTime, wiki: wiki, chapters: chapters)
+	}
+
+	/// byTime 後面補上只存在於 wiki／chapters 的名字（穩定排序、去重）
+	static func withSkeleton(
+		_ byTime: [String], wiki: [String: WikiPage], chapters: [String: String]
+	) -> [String] {
+		var names = byTime
+		var seen = Set(names)
+		for name in wiki.keys.sorted() where seen.insert(name).inserted { names.append(name) }
+		for name in chapters.keys.sorted() where seen.insert(name).inserted { names.append(name) }
+		return names
+	}
+
+	/// 全部概念，卡過的排最上面，其次常出現的（同分照筆畫穩定排）。
+	/// 含零計數的骨架概念——不列的話講義立的頁在總覽永遠看不到
 	func allConcepts() -> [ConceptItem] {
 		let s = conceptStats()
-		return s.byTime
+		return Self.withSkeleton(s.byTime, wiki: wiki, chapters: chapters)
 			.map { name in
 				ConceptItem(
 					name: name, appearances: s.appearances[name] ?? 0,
