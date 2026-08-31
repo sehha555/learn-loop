@@ -27,6 +27,9 @@ targets:
   LearnLoop:
     type: application
     platform: iOS
+    scheme:
+      testTargets:
+        - LearnLoopTests
     sources:
       - LearnLoop
       - Shared
@@ -75,3 +78,17 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.sehha555.learnloop.share
     dependencies:
       - package: SwiftMath
+
+  # 純邏輯的單元測試（ConceptLogic）。跑法：
+  # xcodebuild test -project LearnLoop.xcodeproj -scheme LearnLoop -destination 'platform=iOS Simulator,name=iPad Pro 11-inch (M5)'
+  LearnLoopTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - LearnLoopTests
+    dependencies:
+      - target: LearnLoop
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sehha555.learnloop.tests
+        GENERATE_INFOPLIST_FILE: YES
