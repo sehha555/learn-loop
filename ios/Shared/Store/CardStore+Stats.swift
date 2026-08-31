@@ -98,6 +98,16 @@ extension CardStore {
 		problems.filter { $0.concepts.contains(name) }
 	}
 
+	/// 概念頁「你卡過的」：技巧 → 栽的題（次數降冪）
+	func stuckSkills(for concept: String) -> [ConceptLogic.StuckSkill] {
+		ConceptLogic.stuckSkills(in: topics, for: concept)
+	}
+
+	/// 全部技巧名（新到舊），判題 prompt 用
+	func allStuckSkills() -> [String] {
+		ConceptLogic.allStuckSkills(in: topics)
+	}
+
 	/// 「卡過」的門檻只在這裡定義 —— 紅字、紅框、紅色次數全問這一個。
 	/// 手上已有次數的呼叫端直接餵數字，不用再掃一次
 	func isRepeated(trouble: Int) -> Bool {

@@ -68,7 +68,7 @@ extension CardStore {
 		let result = try await ai.ingest(
 			text: text, imageJPEG: imageData, hintConcept: hintConcept,
 			knownConcepts: conceptNamesForPrompt(), knownChapters: knownChapters,
-			style: teachingStyle)
+			knownSkills: allStuckSkills(), style: teachingStyle)
 		var tree = Card(title: "", kind: .free)
 		Self.apply(result, text: text, to: &tree)
 		insert(tree)
@@ -86,7 +86,7 @@ extension CardStore {
 		let result = try await ai.ingest(
 			text: text, imageJPEG: imageData, hintConcept: nil,
 			knownConcepts: conceptNamesForPrompt(), knownChapters: knownChapters,
-			style: teachingStyle)
+			knownSkills: allStuckSkills(), style: teachingStyle)
 		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return }
 		Self.apply(result, text: text, to: &topics[index])
 		save()
@@ -109,5 +109,8 @@ extension CardStore {
 		tree.fallbackNote = result.fallbackNote
 		tree.asked = text.isEmpty ? nil : text
 		tree.stuckStep = result.isProblem ? result.stuckStep : nil
+		// 只在真的栽了（stuckStep ≥ 1）才記技巧 —— blank 題模型有時會硬給
+		let skill = result.stuckSkill?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+		tree.stuckSkill = (result.isProblem && (result.stuckStep ?? 0) > 0 && !skill.isEmpty) ? skill : nil
 	}
 }

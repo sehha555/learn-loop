@@ -68,6 +68,9 @@ struct Card: Identifiable, Codable, Hashable {
 	/// 判題時模型看他寫到哪：第幾個解題步驟開始出錯或停下（1 起算）。前面的步驟標「已經對了」、
 	/// 直接給做法時從這步開始自動展開。nil = 舊資料或不是題目；0 = 全對
 	var stuckStep: Int?
+	/// 栽的那一步用的做題技巧（「換算上下限」「代值正負」）。只在真的出錯時有值；
+	/// 概念頁「你卡過的」按它統計。nil = 舊資料、沒栽、或看不出來
+	var stuckSkill: String?
 
 	init(
 		id: UUID = UUID(),
@@ -120,6 +123,7 @@ struct Card: Identifiable, Codable, Hashable {
 		fallbackNote = try container.decodeIfPresent(String.self, forKey: .fallbackNote)
 		asked = try container.decodeIfPresent(String.self, forKey: .asked)
 		stuckStep = try container.decodeIfPresent(Int.self, forKey: .stuckStep)
+		stuckSkill = try container.decodeIfPresent(String.self, forKey: .stuckSkill)
 	}
 
 	var isExpanded: Bool { body != nil }

@@ -135,11 +135,14 @@ struct AIClient {
 		let points: [Point]
 		/// 他從第幾步開始出錯或停下（1 起算，對應 points 裡的 step）。0 或 nil = 沒有這個資訊／全對
 		let stuckStep: Int?
+		/// 栽的那一步用的做題技巧（「換算上下限」）。空字串或 nil = 沒栽／看不出來
+		let stuckSkill: String?
 
 		enum CodingKeys: String, CodingKey {
 			case title, situation, status, transcript, problem, concepts, chapter, points
 			case isProblem = "is_problem"
 			case stuckStep = "stuck_step"
+			case stuckSkill = "stuck_skill"
 		}
 
 		/// 寬容政策收在 wire 邊界：轉不出來、或根本不是題目，就是 nil
@@ -161,7 +164,7 @@ struct AIClient {
 	///     同一個概念每次寫法不同的話，「你第幾次卡」就數不出來
 	func ingest(
 		text: String, imageJPEG: Data?, hintConcept: String?, knownConcepts: [String],
-		knownChapters: [String], style: TeachingStyle
+		knownChapters: [String], knownSkills: [String], style: TeachingStyle
 	) async throws -> Ingested {
 		let hasImage = imageJPEG != nil
 		var prompt = "你是坐在旁邊的助教。使用者丟來了一樣東西：\n"
@@ -207,6 +210,9 @@ struct AIClient {
 		- stuck_step：對照他寫的過程，points 裡第幾個 step 是他開始出錯或停下來的（1 起算），
 		  前面的步驟他已經做對、不用再講。blank（還沒動筆）給 1；done 且全對給 0；
 		  沒有圖或看不出來給 1。
+		- stuck_skill：他在 stuck_step 那一步栽掉時用的是哪個做題技巧，二到八個字
+		  （「換算上下限」「分母因式分解」「代值正負」）。只在看得出他真的做錯或停下時給；
+		  blank、全對、或看不出來就給空字串。\(knownSkills.isEmpty ? "" : "他過去栽過的技巧有：\(knownSkills.joined(separator: "、"))。語意相同的務必重用原名、一個字都不要改，都不像才取新名。")
 
 		B. is_problem 為 false（他在問東西）：
 		\(style.askStatusRule)
@@ -289,6 +295,7 @@ struct AIClient {
 				"items": pointSchema(kinds: ["step", "question", "supplement", "trap", "extend"]),
 			],
 			"stuck_step": ["type": "integer"],
+			"stuck_skill": ["type": "string"],
 		]
 		var required = [
 			"title", "is_problem", "situation", "status", "problem", "concepts", "chapter", "points",
