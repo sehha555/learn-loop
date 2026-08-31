@@ -54,10 +54,37 @@ extension CardStore {
 	/// 重寫一個概念的整理頁。有上一版就讓模型修訂，不是每次從零寫
 	func compileWiki(for concept: String) async throws {
 		let material = wikiMaterial(for: concept)
+		let known = allConcepts().map(\.name).filter { $0 != concept }
 		let result = try await ai.compileWiki(
-			concept: concept, material: material, previous: wiki[concept])
+			concept: concept, material: material, previous: wiki[concept], knownConcepts: known)
+		// links 只留真的存在的概念 —— 模型自創的名字不進資料（地圖畫連線時會指到空節點）
+		var seen = Set<String>()
+		let links = result.links.filter {
+			known.contains($0.concept) && seen.insert($0.concept).inserted
+		}
+		// 圖：kind 不認得、none、或空 content 都不存；plot 有跑出 PNG 才留檔
+		var figure: WikiFigure?
+		if let raw = result.figure, let kind = WikiFigure.Kind(rawValue: raw.kind),
+			!raw.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+		{
+			figure = WikiFigure(kind: kind, content: raw.content, pngID: nil)
+			if kind == .plot {
+				if let data = result.figureData {
+					let id = UUID()
+					saveFigure(data, for: id)
+					figure?.pngID = id
+				} else {
+					figure = nil  // 座標圖沒畫出來，code 本身給使用者看沒意義
+				}
+			}
+		}
+		// 換掉舊圖檔
+		if let oldID = wiki[concept]?.figure?.pngID, oldID != figure?.pngID {
+			try? FileManager.default.removeItem(at: figureFileURL(oldID))
+		}
 		wiki[concept] = WikiPage(
-			what: result.what, keyPoints: result.keyPoints, stuck: result.stuck, gaps: result.gaps,
+			what: result.what, figure: figure, links: links, uses: result.uses,
+			examTopics: wiki[concept]?.examTopics ?? [],
 			compiledAt: Date(), materialCount: material.count, fallbackNote: result.fallbackNote)
 		saveWiki()
 	}
