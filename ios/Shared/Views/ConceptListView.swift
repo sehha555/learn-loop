@@ -10,6 +10,11 @@ struct ConceptListView: View {
 		UserDefaults.standard.stringArray(forKey: "collapsedChapters") ?? [])
 	/// 長按「併入…」選了哪個概念要被併走
 	@State private var merging: MergeSource?
+	/// 「整理概念清單」進行中的請求。存 Task 讓「取消」真的能中斷
+	@State private var linting: Task<Void, Never>?
+	/// 模型建議的合併，等使用者勾選確認
+	@State private var lintResult: [AIClient.ConceptMerge]?
+	@State private var lintError: String?
 
 	var body: some View {
 		Group {
@@ -70,8 +75,52 @@ struct ConceptListView: View {
 			}
 		}
 		.navigationTitle("概念")
+		.toolbar {
+			ToolbarItem(placement: .primaryAction) {
+				if linting != nil {
+					HStack(spacing: 8) {
+						ProgressView().controlSize(.small)
+						Button("取消") { linting?.cancel() }.font(.caption)
+					}
+				} else {
+					// 模型看整份清單找同義／太細的，回提案讓你勾——按了才跑，不自動
+					Button("整理概念清單", systemImage: "wand.and.stars") { lint() }
+						.disabled(store.allConcepts().isEmpty)
+				}
+			}
+		}
 		.sheet(item: $merging) { source in
 			MergePickerView(store: store, source: source.name)
+		}
+		.sheet(
+			isPresented: Binding(get: { lintResult != nil }, set: { if !$0 { lintResult = nil } })
+		) {
+			if let lintResult {
+				LintConfirmView(store: store, merges: lintResult)
+			}
+		}
+		.errorAlert($lintError)
+	}
+
+	private func lint() {
+		guard linting == nil else { return }
+		guard store.hasProvider else {
+			lintError = AIError.noAPIKey.localizedDescription
+			return
+		}
+		linting = Task { @MainActor in
+			defer { linting = nil }
+			do {
+				let merges = try await store.lintConcepts()
+				if merges.isEmpty {
+					lintError = "模型看完整份清單：沒有該合併的。"
+				} else {
+					lintResult = merges
+				}
+			} catch {
+				guard !AIClient.isCancellation(error) else { return }
+				lintError = error.localizedDescription
+			}
 		}
 	}
 
@@ -199,5 +248,77 @@ private struct MergePickerView: View {
 		store.knownConceptNames().filter {
 			$0 != source && (query.isEmpty || $0.localizedStandardContains(query))
 		}
+	}
+}
+
+/// 「整理概念清單」跑完的確認頁：每筆一個 Toggle，勾了才套。
+/// keep 不在清單裡的（模型自創名）標灰不能勾——合併需要目標真的存在
+private struct LintConfirmView: View {
+	@ObservedObject var store: CardStore
+	let merges: [AIClient.ConceptMerge]
+	@Environment(\.dismiss) private var dismiss
+	@State private var enabled: Set<Int> = []
+
+	/// 攤平成一筆一對（drop → keep），勾選按這個算
+	private var pairs: [(keep: String, drop: String)] {
+		merges.flatMap { merge in merge.drop.map { (merge.keep, $0) } }
+	}
+
+	var body: some View {
+		NavigationStack {
+			List {
+				Section {
+					ForEach(Array(pairs.enumerated()), id: \.offset) { index, pair in
+						let valid = isValid(pair)
+						Toggle(isOn: binding(index)) {
+							VStack(alignment: .leading, spacing: 2) {
+								Text("\(pair.drop) → \(pair.keep)")
+									.foregroundStyle(valid ? .primary : .tertiary)
+								if !valid {
+									Text("「\(pair.keep)」不在清單裡，不能當合併目標")
+										.font(.caption2)
+										.foregroundStyle(.tertiary)
+								}
+							}
+						}
+						.disabled(!valid)
+					}
+				} footer: {
+					Text("勾選的會把左邊併進右邊：題目、章、考試範圍全部改名，整理頁併進去。沒把握的取消勾選就好。")
+				}
+			}
+			.navigationTitle("模型建議的合併")
+			.navigationBarTitleDisplayMode(.inline)
+			.toolbar {
+				ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+				ToolbarItem(placement: .confirmationAction) {
+					Button("套用 \(enabled.count) 筆") { apply() }
+						.disabled(enabled.isEmpty)
+				}
+			}
+		}
+		.onAppear {
+			enabled = Set(pairs.indices.filter { isValid(pairs[$0]) })
+		}
+	}
+
+	private func isValid(_ pair: (keep: String, drop: String)) -> Bool {
+		pair.keep != pair.drop && store.knownConceptNames().contains(pair.keep)
+	}
+
+	private func binding(_ index: Int) -> Binding<Bool> {
+		Binding(
+			get: { enabled.contains(index) },
+			set: { if $0 { enabled.insert(index) } else { enabled.remove(index) } })
+	}
+
+	private func apply() {
+		for index in pairs.indices where enabled.contains(index) {
+			let pair = pairs[index]
+			// 前一筆可能剛把這筆的 keep 併走了，套之前再驗一次
+			guard store.knownConceptNames().contains(pair.keep) else { continue }
+			store.mergeConcept(keep: pair.keep, drop: pair.drop)
+		}
+		dismiss()
 	}
 }

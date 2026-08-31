@@ -16,4 +16,19 @@ extension CardStore {
 		saveChapters()
 		saveExams()
 	}
+
+	/// 「整理概念清單」：組整份清單（名稱＋章＋前 5 題標題）給模型找同義與太細的。
+	/// 只回提案——套不套、套哪幾筆由使用者在確認頁勾
+	func lintConcepts() async throws -> [AIClient.ConceptMerge] {
+		let summary = allConcepts()
+			.map { item in
+				let titles = topics(withConcept: item.name).prefix(5)
+					.map { $0.problem ?? $0.title }
+					.joined(separator: "／")
+				let chapter = chapters[item.name].map { "（\($0)）" } ?? ""
+				return "\(item.name)\(chapter)：\(titles)"
+			}
+			.joined(separator: "\n")
+		return try await ai.lintConcepts(summary: summary)
+	}
 }
