@@ -9,7 +9,7 @@ extension CardStore {
 		exams = decoded.sorted { $0.date < $1.date }
 	}
 
-	private func saveExams() {
+	func saveExams() {
 		exams.sort { $0.date < $1.date }
 		guard let data = try? JSONEncoder().encode(exams) else { return }
 		try? data.write(to: examsURL, options: .atomic)

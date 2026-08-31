@@ -126,6 +126,26 @@ struct Card: Identifiable, Codable, Hashable {
 		stuckSkill = try container.decodeIfPresent(String.self, forKey: .stuckSkill)
 	}
 
+	/// 合併概念用：整棵樹把舊名換成新名（concepts 換完去重保序、noteConcept 一起換）。
+	/// 回傳這棵有沒有動到
+	@discardableResult
+	mutating func renameConcept(_ old: String, to new: String) -> Bool {
+		var changed = false
+		if concepts.contains(old) {
+			var seen = Set<String>()
+			concepts = concepts.map { $0 == old ? new : $0 }.filter { seen.insert($0).inserted }
+			changed = true
+		}
+		if noteConcept == old {
+			noteConcept = new
+			changed = true
+		}
+		for index in children.indices where children[index].renameConcept(old, to: new) {
+			changed = true
+		}
+		return changed
+	}
+
 	var isExpanded: Bool { body != nil }
 
 	/// 這棵子樹裡還沒展開的節點數 —— 就是「數得出來的 TODO」

@@ -9,7 +9,7 @@ extension CardStore {
 		chapters = decoded
 	}
 
-	private func saveChapters() {
+	func saveChapters() {
 		guard let data = try? JSONEncoder().encode(chapters) else { return }
 		try? data.write(to: chaptersURL, options: .atomic)
 	}

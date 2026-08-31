@@ -8,6 +8,8 @@ struct ConceptListView: View {
 	/// 收起來的章。改 @State 畫面才會重畫；UserDefaults 只負責記住
 	@State private var collapsed = Set(
 		UserDefaults.standard.stringArray(forKey: "collapsedChapters") ?? [])
+	/// 長按「併入…」選了哪個概念要被併走
+	@State private var merging: MergeSource?
 
 	var body: some View {
 		Group {
@@ -29,6 +31,7 @@ struct ConceptListView: View {
 						Section("該回頭看的") {
 							ForEach(review, id: \.name) { item in
 								reviewRow(item)
+									.contextMenu { mergeButton(item.name) }
 							}
 						}
 					}
@@ -46,6 +49,7 @@ struct ConceptListView: View {
 												.foregroundStyle(.secondary)
 										}
 									}
+									.contextMenu { mergeButton(item.name) }
 								}
 							}
 						} header: {
@@ -66,6 +70,16 @@ struct ConceptListView: View {
 			}
 		}
 		.navigationTitle("概念")
+		.sheet(item: $merging) { source in
+			MergePickerView(store: store, source: source.name)
+		}
+	}
+
+	/// 長按選單：把這個概念併進別的（同義詞、模型手滑取的新名都靠這裡收）
+	private func mergeButton(_ name: String) -> some View {
+		Button("併入其他概念…", systemImage: "arrow.triangle.merge") {
+			merging = MergeSource(name: name)
+		}
 	}
 
 	private typealias Item = CardStore.ConceptItem
@@ -98,6 +112,11 @@ struct ConceptListView: View {
 		return parts.joined(separator: " · ")
 	}
 
+	private struct MergeSource: Identifiable {
+		let name: String
+		var id: String { name }
+	}
+
 	/// 該回頭看的一列：紅概念名＋一起出現的夥伴，右邊兩種證據的次數＋最後一次卡的日期
 	private func reviewRow(_ item: Item) -> some View {
 		NavigationLink(value: item.name) {
@@ -124,6 +143,61 @@ struct ConceptListView: View {
 					}
 				}
 			}
+		}
+	}
+}
+
+/// 「A 併入 B」的選單：列出全部概念（排除 A），點一個、確認、合併。
+/// 合併＝A 的題目標籤、章、考試涵蓋全改成 B，整理頁併進 B 的
+private struct MergePickerView: View {
+	@ObservedObject var store: CardStore
+	/// 要被併走的概念
+	let source: String
+	@Environment(\.dismiss) private var dismiss
+	@State private var query = ""
+	/// 點了哪個當合併目標（等確認）
+	@State private var target: String?
+
+	var body: some View {
+		NavigationStack {
+			List(candidates, id: \.self) { name in
+				Button {
+					target = name
+				} label: {
+					HStack {
+						Text(name)
+						Spacer()
+						Text(store.chapters[name] ?? "")
+							.font(.caption)
+							.foregroundStyle(.secondary)
+					}
+				}
+				.foregroundStyle(.primary)
+			}
+			.searchable(text: $query, prompt: "找要併入的概念")
+			.navigationTitle("「\(source)」併入…")
+			.navigationBarTitleDisplayMode(.inline)
+			.toolbar {
+				ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+			}
+			.confirmationDialog(
+				"把「\(source)」併入「\(target ?? "")」？",
+				isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } }),
+				titleVisibility: .visible
+			) {
+				Button("合併", role: .destructive) {
+					if let target { store.mergeConcept(keep: target, drop: source) }
+					dismiss()
+				}
+			} message: {
+				Text("「\(source)」的題目、章、考試範圍會全部改標「\(target ?? "")」，整理頁也併進去。這動作沒有復原。")
+			}
+		}
+	}
+
+	private var candidates: [String] {
+		store.knownConceptNames().filter {
+			$0 != source && (query.isEmpty || $0.localizedStandardContains(query))
 		}
 	}
 }
