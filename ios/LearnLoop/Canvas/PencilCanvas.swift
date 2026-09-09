@@ -1,15 +1,23 @@
 import PencilKit
 import SwiftUI
 
+/// 活的 PKCanvasView 的弱參考。圈選送出時讀 drawing／contentOffset 用
+final class CanvasHandle {
+	weak var view: PKCanvasView?
+}
+
 /// PKCanvasView 包成 SwiftUI。一頁一個 PKDrawing，換頁就換 drawing；停筆存檔交給 CanvasStore。
 /// 圈選模式時整個 canvas 不收觸控（interactive = false），筆畫才不會跟拉框打架
 struct PencilCanvas: UIViewRepresentable {
 	let pageID: UUID
 	@ObservedObject var store: CanvasStore
 	var interactive: Bool
+	/// 讓 SwiftUI 那邊拿得到活的 canvas（圈選時要當下的筆跡與捲動位置，不能等存檔）
+	let handle: CanvasHandle
 
 	func makeUIView(context: Context) -> PKCanvasView {
 		let view = PKCanvasView()
+		handle.view = view
 		// 模擬器沒 Pencil、手指也要能畫；真機上 Pencil 照常，手指用來捲動的話之後再改 pencilOnly
 		view.drawingPolicy = .anyInput
 		view.backgroundColor = .white
