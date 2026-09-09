@@ -39,9 +39,11 @@ struct ConceptPageView: View {
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 20) {
-				header
+				// 統計算一次往下傳：標頭跟第 5 塊的數字要對得起來
+				let stats = store.conceptStats()
+				header(stats)
 				wikiSection
-				stuckSection
+				stuckSection(asked: stats.asked[name] ?? 0)
 				practiceButton
 				rawSection
 				if let open {
@@ -60,8 +62,7 @@ struct ConceptPageView: View {
 	/// 概念名已經在導覽列上，這裡只放次數。
 	/// 卡過時把證據攤開 ——「截圖看起來卡 2 次」跟「自己問了 2 次」可信度不同，不混成一個數字
 	@ViewBuilder
-	private var header: some View {
-		let stats = store.conceptStats()
+	private func header(_ stats: ConceptStats) -> some View {
 		let appearances = stats.appearances[name] ?? 0
 		let stuck = stats.stuck[name] ?? 0
 		let asked = stats.asked[name] ?? 0
@@ -285,8 +286,10 @@ struct ConceptPageView: View {
 
 	// MARK: - 第 5 塊：你卡過的（程式統計，不用整理）
 
+	/// asked：標頭那個「問過 N 次」。直接問的沒有技巧標籤，所以不會出現在下面的統計裡 ——
+	/// 標頭寫 5 次、下面加起來 3 次，落差要講出來
 	@ViewBuilder
-	private var stuckSection: some View {
+	private func stuckSection(asked: Int) -> some View {
 		let skills = store.stuckSkills(for: name)
 		VStack(alignment: .leading, spacing: 8) {
 			Text("5 · 你卡過的")
@@ -328,6 +331,9 @@ struct ConceptPageView: View {
 					.padding(10)
 					.background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 				}
+			}
+			if asked > 0 {
+				caption("另外 \(asked) 次是你直接問的，沒有技巧標籤，不在上面的統計裡。")
 			}
 		}
 		.padding(12)
