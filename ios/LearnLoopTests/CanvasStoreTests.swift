@@ -46,6 +46,14 @@ final class CanvasStoreTests: XCTestCase {
 		XCTAssertNotNil(reopened.backgroundImage(for: reopened.pages[3]))
 	}
 
+	/// 新開的白紙要落地：重開要是同一張，筆跡才對得上
+	@MainActor
+	func testFirstPagePersistsAcrossReopen() {
+		let dir = tempDir()
+		let first = CanvasStore(dataDir: dir).pages[0].id
+		XCTAssertEqual(CanvasStore(dataDir: dir).pages[0].id, first)
+	}
+
 	@MainActor
 	func testBlocksPersistAndLookup() {
 		let dir = tempDir()

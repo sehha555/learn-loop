@@ -23,7 +23,11 @@ final class CanvasStore: ObservableObject {
 		filesDir = dir.appendingPathComponent("files", isDirectory: true)
 		try? FileManager.default.createDirectory(at: filesDir, withIntermediateDirectories: true)
 		load()
-		if pages.isEmpty { pages = [CanvasPage()] }
+		// 第一張白紙也要落地：不存的話重開就是另一張新的，寫過的筆跡檔變孤兒
+		if pages.isEmpty {
+			pages = [CanvasPage()]
+			savePages()
+		}
 	}
 
 	private func load() {

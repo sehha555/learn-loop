@@ -42,16 +42,24 @@ struct CanvasTabView: View {
 	private var page: CanvasPage { canvas.pages[min(pageIndex, canvas.pages.count - 1)] }
 
 	var body: some View {
-		HStack(spacing: 0) {
-			if openTopicID != nil, panelOnLeft {
-				panel
-				divider
+		// 外層一個 NavigationStack：撐住頂端安全區（分頁列底下），概念 chip 的跳轉也走它（整頁推入，跟別的分頁一樣）
+		NavigationStack(path: $path) {
+			HStack(spacing: 0) {
+				if openTopicID != nil, panelOnLeft {
+					panel
+					divider
+				}
+				paper
+				if openTopicID != nil, !panelOnLeft {
+					divider
+					panel
+				}
 			}
-			paper
-			if openTopicID != nil, !panelOnLeft {
-				divider
-				panel
+			.navigationBarTitleDisplayMode(.inline)
+			.toolbar {
+				ToolbarItemGroup(placement: .primaryAction) { pageControls }
 			}
+			.conceptDestinations(store: store) { path.append($0) }
 		}
 		.errorAlert($errorText)
 		// 講義當底：PDF 每頁一張紙、圖片一張紙，插在目前頁後面
@@ -72,33 +80,27 @@ struct CanvasTabView: View {
 			background: canvas.backgroundImage(for: page), handle: handle)
 			.overlay { blockMarks }
 			.overlay { if selecting { selectionLayer } }
-			.overlay(alignment: .topTrailing) { pageControls }
-			.overlay(alignment: .bottomLeading) { selectButton }
+			// 左上角：工具列跟 iPad 的分頁列同一排，放進去會被壓成圖示；底部又有系統筆工具列
+			.overlay(alignment: .topLeading) { selectButton.padding(12) }
 			.ignoresSafeArea(.keyboard)
 	}
 
-	/// 頁碼與翻頁。iPad 的分頁列佔了導覽列，所以自己貼在紙的角落
+	/// 頁碼、翻頁、匯入，收在工具列右邊
+	@ViewBuilder
 	private var pageControls: some View {
-		HStack(spacing: 6) {
-			Button("上一頁", systemImage: "chevron.left") { pageIndex -= 1 }
-				.disabled(pageIndex == 0)
-			Text("第 \(pageIndex + 1) 頁 / \(canvas.pages.count)")
-				.font(.caption)
-				.foregroundStyle(.secondary)
-			Button("下一頁", systemImage: "chevron.right") { pageIndex += 1 }
-				.disabled(pageIndex >= canvas.pages.count - 1)
-			Button("新增頁", systemImage: "plus") { pageIndex = canvas.addPage(after: pageIndex) }
-			Button("匯入講義", systemImage: "square.and.arrow.down") { importing = true }
-		}
-		.labelStyle(.iconOnly)
-		.font(.caption.weight(.semibold))
-		.padding(.horizontal, 10)
-		.padding(.vertical, 6)
-		.background(.thinMaterial, in: Capsule())
-		.padding(12)
+		Button("上一頁", systemImage: "chevron.left") { pageIndex -= 1 }
+			.disabled(pageIndex == 0)
+		// 工具列跟分頁列同一排，位子少，頁碼只寫「1 / 3」
+		Text("\(pageIndex + 1) / \(canvas.pages.count)")
+			.font(.caption.monospacedDigit())
+			.foregroundStyle(.secondary)
+		Button("下一頁", systemImage: "chevron.right") { pageIndex += 1 }
+			.disabled(pageIndex >= canvas.pages.count - 1)
+		Button("新增頁", systemImage: "plus") { pageIndex = canvas.addPage(after: pageIndex) }
+		Button("匯入講義", systemImage: "square.and.arrow.down") { importing = true }
 	}
 
-	/// 切「圈一題來問」模式。系統的筆工具列塞不進去，這顆另外放
+	/// 切「圈一題來問」模式
 	private var selectButton: some View {
 		Button {
 			selecting.toggle()
@@ -106,13 +108,12 @@ struct CanvasTabView: View {
 		} label: {
 			Label(selecting ? "取消圈選" : "圈一題來問", systemImage: selecting ? "xmark" : "rectangle.dashed")
 				.font(.subheadline.weight(.semibold))
-				.padding(.horizontal, 14)
-				.padding(.vertical, 9)
+				.padding(.horizontal, 6)
+				.padding(.vertical, 4)
 		}
 		.buttonStyle(.borderedProminent)
 		.buttonBorderShape(.capsule)
 		.tint(selecting ? .secondary : .accentColor)
-		.padding(12)
 		.disabled(asking != nil)
 	}
 
@@ -242,10 +243,11 @@ struct CanvasTabView: View {
 				.offset(x: rect.minX - 11, y: rect.minY - 11)
 			}
 		}
+		// 撐滿紙、靠左上：overlay 預設置中，ZStack 只有內容那麼大的話整組會被推到中間
+		.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 	}
 
 	private func open(_ id: UUID) {
-		path = NavigationPath()
 		openTopicID = id
 	}
 
@@ -273,12 +275,8 @@ struct CanvasTabView: View {
 			.padding(.vertical, 8)
 			Divider()
 			if let openTopicID {
-				NavigationStack(path: $path) {
-					CardTreeView(topicID: openTopicID, store: store)
-						.navigationTitle(store.topics.first { $0.id == openTopicID }?.title ?? "")
-						.navigationBarTitleDisplayMode(.inline)
-						.conceptDestinations(store: store) { path.append($0) }
-				}
+				// 直接放樹；概念 chip 的跳轉走外層的 NavigationStack
+				CardTreeView(topicID: openTopicID, store: store)
 			}
 		}
 		.frame(width: panelWidth)
