@@ -6,12 +6,22 @@ struct CanvasPage: Identifiable, Codable, Hashable {
 	let id: UUID
 	var createdAt: Date
 	var blocks: [CanvasBlock]
+	/// 匯入的講義當底（像 GoodNotes 把 PDF 拿來寫）。nil = 白紙
+	var background: CanvasBackground?
 
-	init(id: UUID = UUID(), createdAt: Date = Date(), blocks: [CanvasBlock] = []) {
+	init(id: UUID = UUID(), createdAt: Date = Date(), blocks: [CanvasBlock] = [], background: CanvasBackground? = nil) {
 		self.id = id
 		self.createdAt = createdAt
 		self.blocks = blocks
+		self.background = background
 	}
+}
+
+/// 底圖來源：canvas/files/<fileID>.<ext> 的第幾頁（圖片永遠是第 0 頁）
+struct CanvasBackground: Codable, Hashable {
+	let fileID: UUID
+	let ext: String
+	let pageIndex: Int
 }
 
 /// 圈選過的一塊：框在畫布上的位置、送出後長出的樹。id 就是 Card.blockID。

@@ -1,5 +1,6 @@
 import PencilKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 畫布 tab：在 app 裡直接手寫（取代 GoodNotes 的第一步）。
 /// 卡住時切「圈一題來問」拉一個框、按「問這一題」，框裡的筆跡走既有的 ingest；
@@ -9,6 +10,7 @@ struct CanvasTabView: View {
 	@ObservedObject var store: CardStore
 	@StateObject private var canvas: CanvasStore
 	@State private var pageIndex = 0
+	@State private var importing = false
 	private let handle = CanvasHandle()
 
 	// 圈選
@@ -52,12 +54,22 @@ struct CanvasTabView: View {
 			}
 		}
 		.errorAlert($errorText)
+		// 講義當底：PDF 每頁一張紙、圖片一張紙，插在目前頁後面
+		.fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .image]) { result in
+			do {
+				pageIndex = try canvas.importFile(from: try result.get(), after: pageIndex)
+			} catch {
+				errorText = error.localizedDescription
+			}
+		}
 	}
 
 	// MARK: - 紙
 
 	private var paper: some View {
-		PencilCanvas(pageID: page.id, store: canvas, interactive: !selecting, handle: handle)
+		PencilCanvas(
+			pageID: page.id, store: canvas, interactive: !selecting,
+			background: canvas.backgroundImage(for: page), handle: handle)
 			.overlay { blockMarks }
 			.overlay { if selecting { selectionLayer } }
 			.overlay(alignment: .topTrailing) { pageControls }
@@ -76,6 +88,7 @@ struct CanvasTabView: View {
 			Button("下一頁", systemImage: "chevron.right") { pageIndex += 1 }
 				.disabled(pageIndex >= canvas.pages.count - 1)
 			Button("新增頁", systemImage: "plus") { pageIndex = canvas.addPage(after: pageIndex) }
+			Button("匯入講義", systemImage: "square.and.arrow.down") { importing = true }
 		}
 		.labelStyle(.iconOnly)
 		.font(.caption.weight(.semibold))
@@ -170,11 +183,15 @@ struct CanvasTabView: View {
 		let offset = handle.view?.contentOffset ?? .zero
 		let rect = selection.offsetBy(dx: offset.x, dy: offset.y)
 		let drawing = handle.view?.drawing ?? canvas.drawing(for: page.id)
-		// PKDrawing 出來是透明背景，直接轉 JPEG 會變黑底
+		// PKDrawing 出來是透明背景，直接轉 JPEG 會變黑底；有講義底圖的話題目印在底圖上，
+		// 他的過程寫在旁邊，兩個都要給模型看 —— 白底、底圖、筆跡三層疊起來再裁
 		let ink = drawing.image(from: rect, scale: 2)
+		let backgroundImage = handle.view?.background
+		let backgroundFrame = handle.view?.backgroundFrame ?? .zero
 		let image = UIGraphicsImageRenderer(size: rect.size).image { context in
 			UIColor.white.setFill()
 			context.fill(CGRect(origin: .zero, size: rect.size))
+			backgroundImage?.draw(in: backgroundFrame.offsetBy(dx: -rect.minX, dy: -rect.minY))
 			ink.draw(in: CGRect(origin: .zero, size: rect.size))
 		}
 		let blockID = UUID()
