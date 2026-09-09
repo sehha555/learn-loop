@@ -127,15 +127,31 @@ enum ConceptLogic {
 		return result
 	}
 
-	/// 全部出現過的技巧名（去重、新到舊），餵給判題 prompt 對齊命名
+	/// 餵給判題 prompt 的技巧名，讓模型重用既有名字。
+	///
+	/// 兩段式而不是純時間，同一份推理見 `CardStore.conceptNamesForPrompt`（改一個要改另一個）：
+	/// 純時間會把「久違但栽最多次」的技巧擠出清單，模型重新命名後統計從頭來 ——
+	/// 而技巧沒有合併工具，漂了就永遠是兩列。
+	/// 栽最多次的佔前 60% 名額（同分最近優先），剩的名額照時間補。只送名字不送次數。
+	/// 過濾判準跟 `stuckSkills(in:for:)` 一致：只看題目樹
 	static func allStuckSkills(in topics: [Card], limit: Int = 40) -> [String] {
-		var seen = Set<String>()
-		var names: [String] = []
-		for tree in topics {
-			guard let skill = tree.stuckSkill, !skill.isEmpty, seen.insert(skill).inserted else { continue }
-			names.append(skill)
-			if names.count >= limit { break }
+		var counts: [String: Int] = [:]
+		// 第一次出現的順序；topics 新到舊所以它就是新到舊
+		var byTime: [String] = []
+		for tree in topics where tree.kind == .topic {
+			guard let skill = tree.stuckSkill, !skill.isEmpty else { continue }
+			if counts[skill] == nil { byTime.append(skill) }
+			counts[skill, default: 0] += 1
 		}
-		return names
+		let byCount = byTime.enumerated()
+			.sorted {
+				let a = counts[$0.element] ?? 0, b = counts[$1.element] ?? 0
+				return a == b ? $0.offset < $1.offset : a > b
+			}
+			.prefix(limit * 3 / 5)
+			.map(\.element)
+		let picked = Set(byCount)
+		let rest = byTime.filter { !picked.contains($0) }
+		return byCount + rest.prefix(limit - byCount.count)
 	}
 }

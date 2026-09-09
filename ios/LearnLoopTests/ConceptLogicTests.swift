@@ -42,6 +42,43 @@ final class ConceptLogicTests: XCTestCase {
 		XCTAssertEqual(ConceptLogic.allStuckSkills(in: topics), ["換算上下限", "代值正負"])
 	}
 
+	/// 久違但栽最多次的技巧要留在清單裡 —— 純時間截斷會把它擠掉
+	func testAllStuckSkillsKeepsOldFrequentSkill() {
+		var topics = (0..<45).map { topic("c\($0)", skill: "新技巧\($0)") }
+		topics += (0..<5).map { _ in topic("舊", skill: "分部積分選 u") }
+		let result = ConceptLogic.allStuckSkills(in: topics)
+		XCTAssertTrue(result.contains("分部積分選 u"))
+		XCTAssertEqual(result.count, 40)
+		XCTAssertEqual(result[0], "分部積分選 u")
+	}
+
+	/// 同分時較近的排前面；第二段照時間補、不重複
+	func testAllStuckSkillsTiesByRecency() {
+		let topics = [
+			topic("a", skill: "近"),
+			topic("b", skill: "遠"),
+			topic("c", skill: "近"),
+			topic("d", skill: "遠"),
+			topic("e", skill: "只一次"),
+		]
+		XCTAssertEqual(ConceptLogic.allStuckSkills(in: topics), ["近", "遠", "只一次"])
+	}
+
+	func testAllStuckSkillsRespectsLimit() {
+		let topics = (0..<10).map { topic("c\($0)", skill: "技巧\($0)") }
+		XCTAssertEqual(ConceptLogic.allStuckSkills(in: topics, limit: 5).count, 5)
+	}
+
+	/// 非題目樹的 stuckSkill 不算（跟 stuckSkills(in:for:) 同一個判準）
+	func testAllStuckSkillsIgnoresNonTopicTrees() {
+		let topics = [
+			topic("a", skill: "硬塞", kind: .note),
+			topic("b", skill: "硬塞", kind: .free),
+			topic("c", skill: "正常"),
+		]
+		XCTAssertEqual(ConceptLogic.allStuckSkills(in: topics), ["正常"])
+	}
+
 	// MARK: - 合併概念
 
 	private func page(
