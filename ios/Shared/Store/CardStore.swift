@@ -37,6 +37,8 @@ final class CardStore: ObservableObject {
 	/// 是否真的拿到共享目錄。false 代表現在是免費簽章，主 app 與浮層各存各的。
 	let isShared: Bool
 
+	/// 資料根目錄（App Group 或沙盒 Documents）。主 app 的畫布資料也放這底下
+	let dataDir: URL
 	private let fileURL: URL
 	let wikiURL: URL
 	let chaptersURL: URL
@@ -52,6 +54,7 @@ final class CardStore: ObservableObject {
 		isShared = shared != nil
 		let dir = shared ?? FileManager.default.urls(
 			for: .documentDirectory, in: .userDomainMask)[0]
+		dataDir = dir
 		fileURL = dir.appendingPathComponent("topics.json")
 		wikiURL = dir.appendingPathComponent("wiki.json")
 		chaptersURL = dir.appendingPathComponent("chapters.json")
@@ -103,6 +106,18 @@ final class CardStore: ObservableObject {
 			TeachingStyle.from(stored: defaults.string(forKey: "teachingStyle"))
 		}
 		set { defaults.set(newValue.rawValue, forKey: "teachingStyle") }
+	}
+
+	/// 畫布分頁：樹欄在紙的哪一邊（左撇子換到左邊）。存偏好，不是狀態
+	var canvasPanelOnLeft: Bool {
+		get { defaults.bool(forKey: "canvasPanelOnLeft") }
+		set { defaults.set(newValue, forKey: "canvasPanelOnLeft") }
+	}
+
+	/// 畫布分頁：樹欄寬度（pt）。0 = 沒拖過，用預設
+	var canvasPanelWidth: Double {
+		get { defaults.double(forKey: "canvasPanelWidth") }
+		set { defaults.set(newValue, forKey: "canvasPanelWidth") }
 	}
 
 	// MARK: - 讀寫
