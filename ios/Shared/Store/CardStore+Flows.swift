@@ -60,8 +60,10 @@ extension CardStore {
 	/// 都掛在模型判的概念下。回傳新樹的 id 讓畫面跳進去。
 	/// - understanding: 問概念時他先寫的理解（可空）。有的話模型針對理解的破洞答、並記標籤
 	/// - hintConcept: 在哪個概念頁問的，給模型當歸類提示
+	/// - blockID: 畫布圈選送的才有——對到畫布上那一塊；是題目就存成 .canvas 樹
 	func ingest(
-		text: String, image: UIImage?, understanding: String? = nil, hintConcept: String? = nil
+		text: String, image: UIImage?, understanding: String? = nil, hintConcept: String? = nil,
+		blockID: UUID? = nil
 	) async throws -> UUID {
 		var imageData: Data?
 		if let image {
@@ -73,6 +75,7 @@ extension CardStore {
 			knownConcepts: conceptNamesForPrompt(), knownChapters: knownChapters,
 			knownSkills: allStuckSkills(), style: teachingStyle)
 		var tree = Card(title: "", kind: .free)
+		tree.blockID = blockID
 		Self.apply(result, text: text, understanding: understanding, to: &tree)
 		insert(tree)
 		assignChapter(result.chapter, to: result.concepts)
@@ -97,13 +100,14 @@ extension CardStore {
 		assignChapter(result.chapter, to: result.concepts)
 	}
 
-	/// 模型回覆寫進樹的根。ingest 新建與 reask 重生共用，兩邊的欄位對應不會走岔
+	/// 模型回覆寫進樹的根。ingest 新建與 reask 重生共用，兩邊的欄位對應不會走岔。
+	/// 種類看兩件事：是不是題目、是不是畫布圈來的（tree.blockID 先設好）——重生時 blockID 還在，種類才不會掉回 .topic
 	private static func apply(
 		_ result: AIClient.Ingested, text: String, understanding: String?, to tree: inout Card
 	) {
 		tree.title = result.title
 		tree.body = result.status
-		tree.kind = result.isProblem ? .topic : .free
+		tree.kind = result.isProblem ? (tree.blockID == nil ? .topic : .canvas) : .free
 		tree.children = result.points.map(\.card)
 		tree.concepts = result.concepts
 		tree.situation = result.parsedSituation

@@ -21,7 +21,7 @@ extension CardStore {
 		var blocks: [String] = []
 		for tree in topics where tree.concepts.contains(concept) && tree.kind != .note {
 			var lines: [String] = []
-			if tree.kind == .topic {
+			if tree.kind.isProblemTree {
 				lines.append("【題目】\(tree.problem ?? tree.title)")
 				if let situation = tree.situation { lines.append("他當時的狀態：\(situation.label)") }
 				if let asked = tree.asked { lines.append("他貼題時說：\(asked)") }

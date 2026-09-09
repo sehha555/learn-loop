@@ -32,16 +32,17 @@ final class ConceptLogicTests: XCTestCase {
 		XCTAssertEqual(result[0].count, 1)
 	}
 
-	/// 題目栽的技巧跟問答理解的破洞是同一欄，統計要合在一起
-	func testStuckSkillsMixesTopicAndFreeTrees() {
+	/// 題目栽的技巧、問答理解的破洞、畫布圈的題栽的技巧是同一欄，統計要合在一起
+	func testStuckSkillsMixesTopicFreeAndCanvasTrees() {
 		let topics = [
 			topic("分部積分", skill: "當公式背沒推導", kind: .free),
 			topic("分部積分", skill: "當公式背沒推導"),
 			topic("分部積分", skill: "選錯 u"),
+			topic("分部積分", skill: "選錯 u", kind: .canvas),
 		]
 		let result = ConceptLogic.stuckSkills(in: topics, for: "分部積分")
 		XCTAssertEqual(result.map(\.skill), ["當公式背沒推導", "選錯 u"])
-		XCTAssertEqual(result[0].count, 2)
+		XCTAssertEqual(result.map(\.count), [2, 2])
 	}
 
 	func testAllStuckSkillsDedupsKeepsOrder() {

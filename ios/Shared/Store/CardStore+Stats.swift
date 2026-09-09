@@ -4,7 +4,8 @@ import Foundation
 ///
 /// 卡住的證據分兩種，可信度不同所以分開存、UI 也分開寫：
 /// - stuck：模型從截圖推的（題目樹 situation == .stuck）
-/// - asked：他自己打字問的（.free 樹）—— 會主動問就是卡住了，這是最強的訊號
+/// - asked：他自己打字問的（.free 樹）、或在畫布上圈一題送出的（.canvas 樹）——
+///   會主動求助就是卡住了，這是最強的訊號
 struct ConceptStats {
 	var appearances: [String: Int] = [:]
 	var stuck: [String: Int] = [:]
@@ -53,6 +54,18 @@ extension CardStore {
 					s.asked[name, default: 0] += 1
 					s.notes[name, default: 0] += 1
 					if s.lastTrouble[name] == nil { s.lastTrouble[name] = tree.createdAt }
+				}
+			case .canvas:
+				// 畫布圈出來的題：是一題（出現、共現都算，roadmap 的線靠這個），
+				// 圈選本身是主動求助所以算 asked；不再算 stuck，不然 trouble 會重複計
+				for name in tree.concepts {
+					if s.appearances[name] == nil && s.asked[name] == nil { s.byTime.append(name) }
+					s.appearances[name, default: 0] += 1
+					s.asked[name, default: 0] += 1
+					if s.lastTrouble[name] == nil { s.lastTrouble[name] = tree.createdAt }
+					for other in tree.concepts where other != name {
+						s.cooccur[name, default: [:]][other, default: 0] += 1
+					}
 				}
 			default:
 				for name in tree.concepts {

@@ -362,7 +362,7 @@ struct CardTreeView: View {
 			} else if card.isExpanded {
 				// 展開過的：點一下收起來，再點打開（落地存檔，離開再回來還記得）
 				store.toggleCollapsed(cardID: card.id)
-			} else if let topic, card.kind == .step, topic.kind == .topic, store.teachingStyle == .direct {
+			} else if let topic, card.kind == .step, topic.kind.isProblemTree, store.teachingStyle == .direct {
 				// 直接給做法的步驟一律整題一起叫；他點的那步就算排在卡住之前也一起帶上
 				expandSteps(topic.children.filter {
 					$0.kind == .step && ($0.id == card.id || !alreadyCorrect($0, in: topic))
@@ -512,7 +512,7 @@ struct CardTreeView: View {
 	/// 「直接給做法」＝貼上去就把解題步驟算好攤開，不用一步步點。只管題目的步驟；
 	/// 他已經做對的（卡住那步之前的）不展開，從卡住那步起整題一次叫
 	private func autoExpandSteps() {
-		guard store.teachingStyle == .direct, let topic, topic.kind == .topic else { return }
+		guard store.teachingStyle == .direct, let topic, topic.kind.isProblemTree else { return }
 		expandSteps(topic.children.filter { $0.kind == .step && !alreadyCorrect($0, in: topic) })
 	}
 

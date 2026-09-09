@@ -17,6 +17,10 @@ struct Card: Identifiable, Codable, Hashable {
 		case custom      // 你自己加的 —— AI 沒猜到的才是最有價值的資料
 		case note        // 一個概念的知識點（不針對題目的問答都掛在這棵樹下），每個概念最多一棵
 		case free        // 直接問的（沒貼題目）—— 自成一棵樹，歸到模型判的概念下
+		case canvas      // 畫布上圈出來送的題 —— 有圖有過程所以判得出栽在哪；圈選本身是主動求助，計數算 asked
+
+		/// 是一道題（有解題步驟、要判卡在哪）——截圖貼的和畫布圈的都是
+		var isProblemTree: Bool { self == .topic || self == .canvas }
 	}
 
 	/// 這一題當下的狀態。診斷時模型判斷，存下來當「卡過幾次」的依據。
@@ -74,6 +78,9 @@ struct Card: Identifiable, Codable, Hashable {
 	var stuckSkill: String?
 	/// 問概念時他自己先寫下的理解 —— 診斷的依據，之後回看才知道當時是怎麼想的。只有樹根有
 	var understanding: String?
+	/// 這棵樹對應畫布上哪一塊 —— 不是座標，是圈選當下產生的 id。畫布那邊存 id → 框的對照表，
+	/// 之後把標註畫回紙上時用它查，模型永遠不碰座標系。nil = 不是畫布來的
+	var blockID: UUID?
 
 	init(
 		id: UUID = UUID(),
@@ -128,6 +135,7 @@ struct Card: Identifiable, Codable, Hashable {
 		stuckStep = try container.decodeIfPresent(Int.self, forKey: .stuckStep)
 		stuckSkill = try container.decodeIfPresent(String.self, forKey: .stuckSkill)
 		understanding = try container.decodeIfPresent(String.self, forKey: .understanding)
+		blockID = try container.decodeIfPresent(UUID.self, forKey: .blockID)
 	}
 
 	/// 合併概念用：整棵樹把舊名換成新名（concepts 換完去重保序、noteConcept 一起換）。
@@ -207,7 +215,7 @@ extension Card {
 		let here = prefix + [title]
 		var lines: [String] = []
 		// 題目本身的 body 是診斷那一句，已另外以「先前的診斷」送出，不重複
-		if let body, kind != .topic {
+		if let body, !kind.isProblemTree {
 			lines.append("\(here.joined(separator: " → "))：\(body)")
 		}
 		for child in children { lines.append(contentsOf: child.explainedLines(prefix: here)) }

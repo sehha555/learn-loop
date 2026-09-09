@@ -110,7 +110,7 @@ extension Card.Kind {
 		case .trap: "！"
 		case .extend: "↗"
 		case .custom: "✎"
-		case .topic: "◆"
+		case .topic, .canvas: "◆"
 		case .note: "◇"
 		case .free: "◇"
 		}
@@ -124,7 +124,7 @@ extension Card.Kind {
 		case .trap: .orange
 		case .extend: .purple
 		case .custom: .pink
-		case .topic: .accentColor
+		case .topic, .canvas: .accentColor
 		case .note: .accentColor
 		case .free: .accentColor
 		}
