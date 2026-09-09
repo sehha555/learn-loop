@@ -10,7 +10,13 @@ import UIKit
 final class CardStore: ObservableObject {
 	static let appGroupID = "group.com.sehha555.learnloop"
 
-	@Published internal(set) var topics: [Card] = []
+	@Published internal(set) var topics: [Card] = [] {
+		// 統計只讀 topics，所以失效點只有這一個；不要在各處手動清，遲早漏一個
+		didSet { conceptStatsCache = nil }
+	}
+	/// `conceptStats()` 的快取（stored property 不能放 extension）。
+	/// 不能標 @Published —— 它在畫 body 時被填，發出變更會讓 SwiftUI 重畫迴圈
+	var conceptStatsCache: ConceptStats?
 	/// 概念 → 模型整理頁。存 wiki.json，跟 topics.json 分開 —— 它是衍生物，樹才是原始資料
 	@Published internal(set) var wiki: [String: WikiPage] = [:]
 	/// 概念 → 章。模型在 ingest 時順便判，第一次出現就定下來；概念總覽靠它分層

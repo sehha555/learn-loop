@@ -85,7 +85,7 @@ struct ConceptListView: View {
 				} else {
 					// 模型看整份清單找同義／太細的，回提案讓你勾——按了才跑，不自動
 					Button("整理概念清單", systemImage: "wand.and.stars") { lint() }
-						.disabled(store.allConcepts().isEmpty)
+						.disabled(!store.hasConcepts)
 				}
 			}
 		}

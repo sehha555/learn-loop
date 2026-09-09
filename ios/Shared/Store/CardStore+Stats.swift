@@ -30,7 +30,16 @@ struct ConceptStats {
 
 // MARK: - 概念統計
 extension CardStore {
+	/// 全表掃描（每棵樹、每個節點、概念數平方的 cooccur），所以快取起來 ——
+	/// 清單每列每個 chip 都會問，body 一重算就是幾百次
 	func conceptStats() -> ConceptStats {
+		if let cached = conceptStatsCache { return cached }
+		let computed = computeConceptStats()
+		conceptStatsCache = computed
+		return computed
+	}
+
+	private func computeConceptStats() -> ConceptStats {
 		var s = ConceptStats()
 		for tree in topics {
 			switch tree.kind {
@@ -141,6 +150,11 @@ extension CardStore {
 			let days = max(0, now.timeIntervalSince(lastTrouble ?? now) / 86400)
 			return Double(trouble) * (days + 1)
 		}
+	}
+
+	/// 有沒有任何叫得出名字的概念 —— 給 `.disabled` 這種只問有無的地方，不用整份 allConcepts() 算完
+	var hasConcepts: Bool {
+		!wiki.isEmpty || !chapters.isEmpty || topics.contains { !$0.concepts.isEmpty }
 	}
 
 	/// 全部叫得出名字的概念：題目裡出現過的 ∪ wiki 有頁的 ∪ 分了章的。
