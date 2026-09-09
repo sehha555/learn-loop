@@ -136,6 +136,11 @@ struct CardTreeView: View {
 					}
 				}
 			}
+			if let understanding = topic.understanding {
+				Text("你當時的理解：\(understanding)")
+					.font(.caption)
+					.foregroundStyle(.secondary)
+			}
 			if let recall = recallText(topic.concepts) {
 				Text(recall)
 					.font(.footnote.weight(.semibold))

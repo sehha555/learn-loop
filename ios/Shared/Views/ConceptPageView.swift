@@ -286,17 +286,18 @@ struct ConceptPageView: View {
 
 	// MARK: - 第 5 塊：你卡過的（程式統計，不用整理）
 
-	/// asked：標頭那個「問過 N 次」。直接問的沒有技巧標籤，所以不會出現在下面的統計裡 ——
+	/// asked：標頭那個「問過 N 次」。直接問但沒寫理解的沒有標籤，不會出現在下面的統計裡 ——
 	/// 標頭寫 5 次、下面加起來 3 次，落差要講出來
 	@ViewBuilder
 	private func stuckSection(asked: Int) -> some View {
 		let skills = store.stuckSkills(for: name)
+		let unlabeled = asked - store.freeQuestions(for: name).filter { $0.stuckSkill != nil }.count
 		VStack(alignment: .leading, spacing: 8) {
 			Text("5 · 你卡過的")
 				.font(.caption.weight(.semibold))
 				.foregroundStyle(.secondary)
 			if skills.isEmpty {
-				caption("還沒有紀錄——判題看出你在哪一步栽了，會按技巧記在這。")
+				caption("還沒有紀錄——判題看出你在哪一步栽了、或問概念時你先寫的理解哪裡破了，會按標籤記在這。")
 			} else {
 				ForEach(skills) { skill in
 					DisclosureGroup {
@@ -332,8 +333,8 @@ struct ConceptPageView: View {
 					.background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 				}
 			}
-			if asked > 0 {
-				caption("另外 \(asked) 次是你直接問的，沒有技巧標籤，不在上面的統計裡。")
+			if unlabeled > 0 {
+				caption("另外 \(unlabeled) 次是你直接問、沒先寫理解的，沒有標籤，不在上面的統計裡。")
 			}
 		}
 		.padding(12)

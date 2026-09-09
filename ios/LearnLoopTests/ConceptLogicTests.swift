@@ -25,11 +25,23 @@ final class ConceptLogicTests: XCTestCase {
 			topic("變數代換法", skill: "換算上下限"),
 			topic("分部積分", skill: "換算上下限"),  // 別的概念
 			topic("變數代換法", skill: nil),  // 沒栽
-			topic("變數代換法", skill: "換算上下限", kind: .note),  // 不是題目樹
+			topic("變數代換法", skill: ""),  // 空字串也是沒栽
 		]
 		let result = ConceptLogic.stuckSkills(in: topics, for: "變數代換法")
 		XCTAssertEqual(result.count, 1)
 		XCTAssertEqual(result[0].count, 1)
+	}
+
+	/// 題目栽的技巧跟問答理解的破洞是同一欄，統計要合在一起
+	func testStuckSkillsMixesTopicAndFreeTrees() {
+		let topics = [
+			topic("分部積分", skill: "當公式背沒推導", kind: .free),
+			topic("分部積分", skill: "當公式背沒推導"),
+			topic("分部積分", skill: "選錯 u"),
+		]
+		let result = ConceptLogic.stuckSkills(in: topics, for: "分部積分")
+		XCTAssertEqual(result.map(\.skill), ["當公式背沒推導", "選錯 u"])
+		XCTAssertEqual(result[0].count, 2)
 	}
 
 	func testAllStuckSkillsDedupsKeepsOrder() {
@@ -69,14 +81,14 @@ final class ConceptLogicTests: XCTestCase {
 		XCTAssertEqual(ConceptLogic.allStuckSkills(in: topics, limit: 5).count, 5)
 	}
 
-	/// 非題目樹的 stuckSkill 不算（跟 stuckSkills(in:for:) 同一個判準）
-	func testAllStuckSkillsIgnoresNonTopicTrees() {
+	/// 問答樹的標籤也要進 prompt 清單（跟 stuckSkills(in:for:) 同一個判準），空的跳過
+	func testAllStuckSkillsIncludesFreeTrees() {
 		let topics = [
-			topic("a", skill: "硬塞", kind: .note),
-			topic("b", skill: "硬塞", kind: .free),
-			topic("c", skill: "正常"),
+			topic("a", skill: "當公式背沒推導", kind: .free),
+			topic("b", skill: "", kind: .free),
+			topic("c", skill: "換算上下限"),
 		]
-		XCTAssertEqual(ConceptLogic.allStuckSkills(in: topics), ["正常"])
+		XCTAssertEqual(ConceptLogic.allStuckSkills(in: topics), ["當公式背沒推導", "換算上下限"])
 	}
 
 	// MARK: - 合併概念

@@ -171,6 +171,8 @@ struct PastedImage: Transferable {
 struct AskField: View {
 	@Binding var text: String
 	@Binding var image: UIImage?
+	/// 問之前先寫自己的理解（可空）。nil = 這格不提供（分享浮層、改問題）
+	var understanding: Binding<String>? = nil
 	var placeholder: String
 	var running: Bool
 	var onCancel: () -> Void
@@ -222,6 +224,17 @@ struct AskField: View {
 						.buttonStyle(.borderless)
 				}
 			}
+			// 留洞給他填：寫了理解，模型就針對理解的破洞答、並記標籤；留空就是「直接告訴我」。
+			// 打了字才出現 —— 只貼圖的多半是題目，不用先寫理解
+			if let understanding, !running, !text.trimmingCharacters(in: .whitespaces).isEmpty {
+				TextField(
+					"先寫你現在怎麼理解的（可空，寫了會幫你找哪裡不對）",
+					text: understanding, axis: .vertical
+				)
+				.font(.caption)
+				.lineLimit(1...4)
+				.padding(.leading, 30)
+			}
 		}
 		.padding(.vertical, 7)
 		.padding(.horizontal, 10)
@@ -239,6 +252,7 @@ struct AskBar: View {
 	var open: (UUID) -> Void
 
 	@State private var text = ""
+	@State private var understanding = ""
 	@State private var image: UIImage?
 	/// 存 Task 是為了讓「取消」真的能中斷
 	@State private var asking: Task<Void, Never>?
@@ -246,8 +260,8 @@ struct AskBar: View {
 
 	var body: some View {
 		AskField(
-			text: $text, image: $image, placeholder: placeholder, running: asking != nil,
-			onCancel: { asking?.cancel() }, onSubmit: submit
+			text: $text, image: $image, understanding: $understanding, placeholder: placeholder,
+			running: asking != nil, onCancel: { asking?.cancel() }, onSubmit: submit
 		)
 		.errorAlert($errorMessage)
 	}
@@ -260,11 +274,14 @@ struct AskBar: View {
 			return
 		}
 		let image = image
+		let written = understanding
 		asking = Task { @MainActor in
 			defer { asking = nil }
 			do {
-				let id = try await store.ingest(text: typed, image: image, hintConcept: hintConcept)
+				let id = try await store.ingest(
+					text: typed, image: image, understanding: written, hintConcept: hintConcept)
 				text = ""
+				understanding = ""
 				self.image = nil
 				open(id)
 			} catch {

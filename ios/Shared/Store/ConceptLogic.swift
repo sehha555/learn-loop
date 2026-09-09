@@ -11,10 +11,11 @@ enum ConceptLogic {
 		var id: String { skill }
 	}
 
-	/// 某概念底下，按技巧統計栽過的題。次數多的在前，同分照筆畫穩定排
+	/// 某概念底下，按標籤統計栽過的題與問。次數多的在前，同分照筆畫穩定排。
+	/// 判準跟 `allStuckSkills` 一致：任何有標籤的樹都算（題目栽的技巧、問答理解的破洞是同一欄）
 	static func stuckSkills(in topics: [Card], for concept: String) -> [StuckSkill] {
 		var groups: [String: [Card]] = [:]
-		for tree in topics where tree.kind == .topic && tree.concepts.contains(concept) {
+		for tree in topics where tree.concepts.contains(concept) {
 			guard let skill = tree.stuckSkill, !skill.isEmpty else { continue }
 			groups[skill, default: []].append(tree)
 		}
@@ -133,12 +134,12 @@ enum ConceptLogic {
 	/// 純時間會把「久違但栽最多次」的技巧擠出清單，模型重新命名後統計從頭來 ——
 	/// 而技巧沒有合併工具，漂了就永遠是兩列。
 	/// 栽最多次的佔前 60% 名額（同分最近優先），剩的名額照時間補。只送名字不送次數。
-	/// 過濾判準跟 `stuckSkills(in:for:)` 一致：只看題目樹
+	/// 過濾判準跟 `stuckSkills(in:for:)` 一致：任何有標籤的樹都算
 	static func allStuckSkills(in topics: [Card], limit: Int = 40) -> [String] {
 		var counts: [String: Int] = [:]
 		// 第一次出現的順序；topics 新到舊所以它就是新到舊
 		var byTime: [String] = []
-		for tree in topics where tree.kind == .topic {
+		for tree in topics {
 			guard let skill = tree.stuckSkill, !skill.isEmpty else { continue }
 			if counts[skill] == nil { byTime.append(skill) }
 			counts[skill, default: 0] += 1

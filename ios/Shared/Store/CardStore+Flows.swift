@@ -58,19 +58,22 @@ extension CardStore {
 	/// 統一入口：題目截圖、直接問、概念頁問、分享進來的圖全走這一條。
 	/// 模型判斷是題目還是提問，題目存成題目樹（kind topic）、提問存成問答樹（kind free），
 	/// 都掛在模型判的概念下。回傳新樹的 id 讓畫面跳進去。
+	/// - understanding: 問概念時他先寫的理解（可空）。有的話模型針對理解的破洞答、並記標籤
 	/// - hintConcept: 在哪個概念頁問的，給模型當歸類提示
-	func ingest(text: String, image: UIImage?, hintConcept: String? = nil) async throws -> UUID {
+	func ingest(
+		text: String, image: UIImage?, understanding: String? = nil, hintConcept: String? = nil
+	) async throws -> UUID {
 		var imageData: Data?
 		if let image {
 			guard let data = AIClient.jpeg(from: image) else { throw AIError.badImage }
 			imageData = data
 		}
 		let result = try await ai.ingest(
-			text: text, imageJPEG: imageData, hintConcept: hintConcept,
+			text: text, imageJPEG: imageData, understanding: understanding, hintConcept: hintConcept,
 			knownConcepts: conceptNamesForPrompt(), knownChapters: knownChapters,
 			knownSkills: allStuckSkills(), style: teachingStyle)
 		var tree = Card(title: "", kind: .free)
-		Self.apply(result, text: text, to: &tree)
+		Self.apply(result, text: text, understanding: understanding, to: &tree)
 		insert(tree)
 		assignChapter(result.chapter, to: result.concepts)
 		// 原始截圖留檔 —— 病歷卡要能看到「題目長什麼樣」；追問附圖也用同一套，key 是那張卡的 id
@@ -83,18 +86,21 @@ extension CardStore {
 		reasking.insert(topicID)
 		defer { reasking.remove(topicID) }
 		let imageData = try? Data(contentsOf: imageFileURL(topicID))
+		let understanding = topics.first { $0.id == topicID }?.understanding
 		let result = try await ai.ingest(
-			text: text, imageJPEG: imageData, hintConcept: nil,
+			text: text, imageJPEG: imageData, understanding: understanding, hintConcept: nil,
 			knownConcepts: conceptNamesForPrompt(), knownChapters: knownChapters,
 			knownSkills: allStuckSkills(), style: teachingStyle)
 		guard let index = topics.firstIndex(where: { $0.id == topicID }) else { return }
-		Self.apply(result, text: text, to: &topics[index])
+		Self.apply(result, text: text, understanding: understanding, to: &topics[index])
 		save()
 		assignChapter(result.chapter, to: result.concepts)
 	}
 
 	/// 模型回覆寫進樹的根。ingest 新建與 reask 重生共用，兩邊的欄位對應不會走岔
-	private static func apply(_ result: AIClient.Ingested, text: String, to tree: inout Card) {
+	private static func apply(
+		_ result: AIClient.Ingested, text: String, understanding: String?, to tree: inout Card
+	) {
 		tree.title = result.title
 		tree.body = result.status
 		tree.kind = result.isProblem ? .topic : .free
@@ -109,8 +115,12 @@ extension CardStore {
 		tree.fallbackNote = result.fallbackNote
 		tree.asked = text.isEmpty ? nil : text
 		tree.stuckStep = result.isProblem ? result.stuckStep : nil
-		// 只在真的栽了（stuckStep ≥ 1）才記技巧 —— blank 題模型有時會硬給
+		let written = understanding?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+		tree.understanding = written.isEmpty ? nil : written
+		// 標籤只在有證據時記：題目要真的栽了（stuckStep ≥ 1，blank 題模型有時會硬給）；
+		// 提問要他有寫理解（沒寫就沒有東西可診斷，硬給只會污染統計）
 		let skill = result.stuckSkill?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-		tree.stuckSkill = (result.isProblem && (result.stuckStep ?? 0) > 0 && !skill.isEmpty) ? skill : nil
+		let evidenced = result.isProblem ? (result.stuckStep ?? 0) > 0 : !written.isEmpty
+		tree.stuckSkill = (evidenced && !skill.isEmpty) ? skill : nil
 	}
 }

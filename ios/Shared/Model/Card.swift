@@ -68,9 +68,12 @@ struct Card: Identifiable, Codable, Hashable {
 	/// 判題時模型看他寫到哪：第幾個解題步驟開始出錯或停下（1 起算）。前面的步驟標「已經對了」、
 	/// 直接給做法時從這步開始自動展開。nil = 舊資料或不是題目；0 = 全對
 	var stuckStep: Int?
-	/// 栽的那一步用的做題技巧（「換算上下限」「代值正負」）。只在真的出錯時有值；
-	/// 概念頁「你卡過的」按它統計。nil = 舊資料、沒栽、或看不出來
+	/// 「栽在哪裡」的標籤，概念頁「你卡過的」按它統計。題目樹記栽的那一步用的做題技巧
+	/// （「換算上下限」「代值正負」）；問答樹記他自陳理解裡的破洞（「當公式背沒推導」）——
+	/// 同一件事的兩種形態，共用一欄統計才會合在一起。nil = 舊資料、沒栽、或看不出來
 	var stuckSkill: String?
+	/// 問概念時他自己先寫下的理解 —— 診斷的依據，之後回看才知道當時是怎麼想的。只有樹根有
+	var understanding: String?
 
 	init(
 		id: UUID = UUID(),
@@ -124,6 +127,7 @@ struct Card: Identifiable, Codable, Hashable {
 		asked = try container.decodeIfPresent(String.self, forKey: .asked)
 		stuckStep = try container.decodeIfPresent(Int.self, forKey: .stuckStep)
 		stuckSkill = try container.decodeIfPresent(String.self, forKey: .stuckSkill)
+		understanding = try container.decodeIfPresent(String.self, forKey: .understanding)
 	}
 
 	/// 合併概念用：整棵樹把舊名換成新名（concepts 換完去重保序、noteConcept 一起換）。

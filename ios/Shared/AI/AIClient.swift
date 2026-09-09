@@ -162,13 +162,21 @@ struct AIClient {
 	///   - hintConcept: 他是在哪個概念頁問的。不是硬性歸類，只是提示
 	///   - knownConcepts: 過去累積的概念名（新到舊）。餵給模型是為了對齊 ——
 	///     同一個概念每次寫法不同的話，「你第幾次卡」就數不出來
+	///   - understanding: 他問之前自己先寫的理解。有的話模型先診斷這段哪裡破，
+	///     status 針對那個洞講、stuck_skill 記洞的種類 —— 「留洞給他填」比反問更有用，
+	///     因為填的對不對是可驗證的。留空就是「直接告訴我」
 	func ingest(
-		text: String, imageJPEG: Data?, hintConcept: String?, knownConcepts: [String],
-		knownChapters: [String], knownSkills: [String], style: TeachingStyle
+		text: String, imageJPEG: Data?, understanding: String? = nil, hintConcept: String?,
+		knownConcepts: [String], knownChapters: [String], knownSkills: [String], style: TeachingStyle
 	) async throws -> Ingested {
 		let hasImage = imageJPEG != nil
+		let understanding = understanding?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+		let reuseSkills = knownSkills.isEmpty
+			? ""
+			: "他過去栽過的標籤有：\(knownSkills.joined(separator: "、"))。語意相同的務必重用原名、一個字都不要改，都不像才取新名。"
 		var prompt = "你是坐在旁邊的助教。使用者丟來了一樣東西：\n"
 		if !text.isEmpty { prompt += "他打的字：「\(text)」\n" }
+		if !understanding.isEmpty { prompt += "他自己先寫下了現在的理解：「\(understanding)」\n" }
 		if hasImage {
 			prompt += text.isEmpty
 				? "他沒打字，只給了一張圖（手寫的題目與過程、筆記、課本的一段都有可能）。\n"
@@ -212,13 +220,21 @@ struct AIClient {
 		  沒有圖或看不出來給 1。
 		- stuck_skill：他在 stuck_step 那一步栽掉時用的是哪個做題技巧，二到八個字
 		  （「換算上下限」「分母因式分解」「代值正負」）。只在看得出他真的做錯或停下時給；
-		  blank、全對、或看不出來就給空字串。\(knownSkills.isEmpty ? "" : "他過去栽過的技巧有：\(knownSkills.joined(separator: "、"))。語意相同的務必重用原名、一個字都不要改，都不像才取新名。")
+		  blank、全對、或看不出來就給空字串。\(reuseSkills)
 
 		B. is_problem 為 false（他在問東西）：
 		\(style.askStatusRule)
 		  kind 用 question（要先弄懂的子問題）
 		  / supplement（接得上的補充）/ trap（常見誤解）/ extend（更一般的版本）。
 		  只是一份筆記、抽不出要問的點，points 就給空陣列，不要硬猜。
+		\(understanding.isEmpty ? "  stuck_skill 給空字串。" : """
+		  他先寫下了自己的理解（見上面引號），先診斷那段理解的破洞在哪：
+		  是把它當公式背沒推導、把兩個東西混在一起、少了一個前提、還是其實是對的。
+		  status 針對那個洞講，不要泛泛重講一遍整個概念；他理解對的部分一句帶過。
+		  points 也從那個洞出發，不是概念的通用介紹。
+		  stuck_skill：那個洞是哪一種，二到八個字（「當公式背沒推導」「混淆定義與性質」「漏掉前提」）；
+		  他的理解沒問題就給空字串。\(reuseSkills)
+		""")
 
 		兩套都一樣：title 是一句話，不要在 title 裡回答它自己 —— 內容是他點下去才生的。
 
