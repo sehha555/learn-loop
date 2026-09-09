@@ -32,6 +32,8 @@ struct LearnLoopApp: App {
 					.tabItem { Label("概念", systemImage: "tag") }
 				ExamListView(store: store)
 					.tabItem { Label("考試", systemImage: "calendar") }
+				CanvasTabView(store: store)
+					.tabItem { Label("畫布", systemImage: "pencil.and.outline") }
 			}
 			// 舊題補抄題目原文，背景跑、跑完清單自己更新
 			.task {
