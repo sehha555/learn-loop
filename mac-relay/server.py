@@ -27,6 +27,9 @@ PORT = 8787
 CALLS_LOG = os.path.expanduser("~/Library/Logs/learn-loop-calls.jsonl")
 # claude 一次呼叫含思考可能要一兩分鐘，比照 app 端的等待上限
 CLAUDE_TIMEOUT = 180
+# claude 的工作目錄固定在這裡：Claude Code 會替每個不同的 cwd 建一個
+# ~/.claude/projects/<slug>/ 目錄，之前每次呼叫都 mkdtemp 當 cwd，兩週就長出 220 個
+CLAUDE_WORK_ROOT = os.path.expanduser("~/Library/Application Support/learn-loop/relay-work")
 # 讀整份講義（幾十頁 PDF）再整理，比一題久得多
 FILES_TIMEOUT = 540
 # 畫圖用的 python（裝了 matplotlib 的獨立 venv，不碰系統 python）。
@@ -89,9 +92,10 @@ def result_envelope(stdout: str) -> dict:
 
 
 def call_claude(prompt: str, image_b64: str | None, schema: dict, files: list | None = None) -> dict:
-    # 圖片落地成暫存檔讓 claude 用 Read 讀。放進獨立目錄並把它當工作目錄，
-    # headless 模式下讀工作目錄內的檔案不會卡權限確認
-    workdir = tempfile.mkdtemp(prefix="learn-loop-relay-")
+    # 圖片落地成暫存檔讓 claude 用 Read 讀。每次呼叫一個子目錄放檔案，
+    # 但 cwd 固定用 CLAUDE_WORK_ROOT：headless 模式下讀 cwd 底下的檔案不會卡權限確認
+    os.makedirs(CLAUDE_WORK_ROOT, exist_ok=True)
+    workdir = tempfile.mkdtemp(prefix="call-", dir=CLAUDE_WORK_ROOT)
     timeout = CLAUDE_TIMEOUT
     try:
         if image_b64:
@@ -127,7 +131,7 @@ def call_claude(prompt: str, image_b64: str | None, schema: dict, files: list | 
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=workdir,
+            cwd=CLAUDE_WORK_ROOT,
         )
         if out.returncode != 0:
             raise RuntimeError(out.stderr.strip()[:300] or "claude 執行失敗")
