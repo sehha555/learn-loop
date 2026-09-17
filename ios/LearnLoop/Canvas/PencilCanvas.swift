@@ -57,8 +57,12 @@ struct PencilCanvas: UIViewRepresentable {
 		let view = PaperCanvasView()
 		handle.view = view
 		view.background = background
-		// 模擬器沒 Pencil、手指也要能畫；真機上 Pencil 照常，手指用來捲動的話之後再改 pencilOnly
+		// 真機只收 Pencil，手掌撐在紙上不會畫出線；模擬器沒 Pencil，手指要能畫
+		#if targetEnvironment(simulator)
 		view.drawingPolicy = .anyInput
+		#else
+		view.drawingPolicy = .pencilOnly
+		#endif
 		view.backgroundColor = .white
 		view.delegate = context.coordinator
 		view.drawing = store.drawing(for: pageID)
