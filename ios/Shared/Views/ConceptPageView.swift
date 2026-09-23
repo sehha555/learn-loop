@@ -43,7 +43,7 @@ struct ConceptPageView: View {
 				let stats = store.conceptStats()
 				header(stats)
 				wikiSection
-				stuckSection(asked: stats.asked[name] ?? 0)
+				stuckSection()
 				practiceButton
 				rawSection
 				if let open {
@@ -286,12 +286,13 @@ struct ConceptPageView: View {
 
 	// MARK: - 第 5 塊：你卡過的（程式統計，不用整理）
 
-	/// asked：標頭那個「問過 N 次」。直接問但沒寫理解的沒有標籤，不會出現在下面的統計裡 ——
-	/// 標頭寫 5 次、下面加起來 3 次，落差要講出來
+	/// 直接問但沒寫理解的沒有標籤，不會出現在下面的統計裡 ——
+	/// 標頭的「問過 N 次」跟下面加起來對不上，落差要講出來。
+	/// 只數直接問的：畫布圈的題也算進 asked，但它有過程可判，不是「沒寫理解」
 	@ViewBuilder
-	private func stuckSection(asked: Int) -> some View {
+	private func stuckSection() -> some View {
 		let skills = store.stuckSkills(for: name)
-		let unlabeled = asked - store.freeQuestions(for: name).filter { $0.stuckSkill != nil }.count
+		let unlabeled = store.freeQuestions(for: name).filter { $0.stuckSkill == nil }.count
 		VStack(alignment: .leading, spacing: 8) {
 			Text("5 · 你卡過的")
 				.font(.caption.weight(.semibold))
