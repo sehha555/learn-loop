@@ -1,40 +1,72 @@
 import PencilKit
 import SwiftUI
 
-/// 活的 PKCanvasView 的弱參考。圈選送出時讀 drawing／contentOffset／底圖用
+/// 活的 PKCanvasView 的弱參考。圈選送出時讀 drawing／contentOffset／底圖用，復原／重做也從這拿
 final class CanvasHandle {
 	weak var view: PaperCanvasView?
 }
 
-/// 底下墊一張講義的 PKCanvasView：底圖是 content 的一部分，跟筆跡一起捲；
+/// 紙上的筆：三色原子筆、螢光筆、橡皮擦、套索。
+/// 不用系統 PKToolPicker —— 它壓在紙底部一大塊、使用者收不掉；改在紙頂一條細工具列自己選
+enum CanvasTool: Equatable {
+	case pen(Int)
+	case marker
+	case eraser
+	case lasso
+
+	static let penColors: [UIColor] = [.black, .systemRed, .systemBlue]
+
+	var pkTool: PKTool {
+		switch self {
+		case .pen(let index): PKInkingTool(.pen, color: Self.penColors[index], width: 3)
+		case .marker: PKInkingTool(.marker, color: .systemYellow, width: 18)
+		case .eraser: PKEraserTool(.vector)
+		case .lasso: PKLassoTool()
+		}
+	}
+}
+
+/// 紙的白底＋淡橫線：跟內容一起捲，看得出寫到哪一行。墊講義的頁只留白底不畫線
+private final class RuledLinesView: UIView {
+	static let spacing: CGFloat = 36
+	var showsLines = true {
+		didSet { setNeedsDisplay() }
+	}
+
+	override init(frame: CGRect) {
+		super.init(frame: frame)
+		backgroundColor = .white
+		contentMode = .redraw
+		isUserInteractionEnabled = false
+	}
+
+	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+	override func draw(_ rect: CGRect) {
+		guard showsLines else { return }
+		UIColor.systemGray5.setStroke()
+		let path = UIBezierPath()
+		var y = (rect.minY / Self.spacing).rounded(.down) * Self.spacing + Self.spacing
+		while y <= rect.maxY {
+			path.move(to: CGPoint(x: rect.minX, y: y))
+			path.addLine(to: CGPoint(x: rect.maxX, y: y))
+			y += Self.spacing
+		}
+		path.lineWidth = 1
+		path.stroke()
+	}
+}
+
+/// 底下墊一張講義（或淡橫線）的 PKCanvasView：底圖是 content 的一部分，跟筆跡一起捲；
 /// 內容高度跟著底圖或筆跡長：講義比螢幕高、或寫到底了，都能往下捲著寫
 final class PaperCanvasView: PKCanvasView {
 	private let backgroundView = UIImageView()
-	/// 筆開著：要當第一回應者，系統筆工具列才會出來。
-	/// 推概念頁再返回時 SwiftUI 不一定重叫 updateUIView，回到畫面上自己接回來
-	var wantsToolPicker = false {
-		didSet { syncFirstResponder() }
-	}
-
-	override func didMoveToWindow() {
-		super.didMoveToWindow()
-		syncFirstResponder()
-	}
-
-	private func syncFirstResponder() {
-		guard window != nil else { return }
-		if wantsToolPicker, !isFirstResponder {
-			DispatchQueue.main.async { self.becomeFirstResponder() }
-		} else if !wantsToolPicker, isFirstResponder {
-			resignFirstResponder()
-		}
-	}
+	private let linesView = RuledLinesView()
 
 	var background: UIImage? {
 		didSet {
 			backgroundView.image = background
-			backgroundColor = background == nil ? .white : .clear
-			isOpaque = background == nil
+			linesView.showsLines = background == nil
 			setNeedsLayout()
 		}
 	}
@@ -45,7 +77,11 @@ final class PaperCanvasView: PKCanvasView {
 	override init(frame: CGRect) {
 		super.init(frame: frame)
 		backgroundView.contentMode = .scaleAspectFit
-		insertSubview(backgroundView, at: 0)
+		// PencilKit 不透明時會自己塗一層底色蓋住墊在下面的 view，所以畫布透明、白底交給 linesView
+		backgroundColor = .clear
+		isOpaque = false
+		insertSubview(linesView, at: 0)
+		insertSubview(backgroundView, at: 1)
 	}
 
 	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -60,9 +96,11 @@ final class PaperCanvasView: PKCanvasView {
 		} else {
 			backgroundView.frame = .zero
 		}
-		// 最後一筆底下永遠留一整個螢幕的空白：寫到被筆工具列蓋住的地方，往上捲就寫得到
+		// 最後一筆底下永遠留一整個螢幕的空白：寫到底了往上捲就有地方繼續寫
 		let ink = drawing.bounds.isNull ? 0 : drawing.bounds.maxY
 		contentSize = CGSize(width: bounds.width, height: max(height, ink + bounds.height, bounds.height * 1.5))
+		let lines = CGRect(origin: .zero, size: contentSize)
+		if linesView.frame != lines { linesView.frame = lines }
 	}
 }
 
@@ -72,8 +110,9 @@ struct PencilCanvas: UIViewRepresentable {
 	let pageID: UUID
 	@ObservedObject var store: CanvasStore
 	var interactive: Bool
-	/// 筆開著才畫得出線、才出筆工具列；關著時手指捲紙看內容
+	/// 筆開著才畫得出線；關著時手指捲紙看內容
 	var penOn: Bool
+	var tool: CanvasTool
 	var background: UIImage?
 	/// 讓 SwiftUI 那邊拿得到活的 canvas（圈選時要當下的筆跡與捲動位置，不能等存檔）
 	let handle: CanvasHandle
@@ -90,14 +129,11 @@ struct PencilCanvas: UIViewRepresentable {
 		#else
 		view.drawingPolicy = .pencilOnly
 		#endif
-		view.backgroundColor = .white
 		view.delegate = context.coordinator
 		view.drawing = store.drawing(for: pageID)
+		view.tool = tool.pkTool
 		context.coordinator.pageID = pageID
-		// 系統的筆工具列：跟著 canvas 當第一回應者出現。出不出來只看筆開關（updateUIView）
-		let picker = PKToolPicker()
-		picker.addObserver(view)
-		context.coordinator.picker = picker
+		context.coordinator.tool = tool
 		return view
 	}
 
@@ -108,14 +144,15 @@ struct PencilCanvas: UIViewRepresentable {
 			view.contentOffset = .zero
 		}
 		if view.background !== background { view.background = background }
+		if context.coordinator.tool != tool {
+			context.coordinator.tool = tool
+			view.tool = tool.pkTool
+		}
 		view.isUserInteractionEnabled = interactive
-		// 圈選中也收工具列：那時紙不收觸控
 		let writing = interactive && penOn
 		view.drawingGestureRecognizer.isEnabled = writing
 		// 手指也能畫（模擬器）時 PencilKit 把捲動改成兩指；筆收起來就該一指捲
 		view.panGestureRecognizer.minimumNumberOfTouches = writing && view.drawingPolicy == .anyInput ? 2 : 1
-		context.coordinator.picker?.setVisible(writing, forFirstResponder: view)
-		view.wantsToolPicker = writing
 	}
 
 	func makeCoordinator() -> Coordinator { Coordinator(store: store, onScroll: onScroll) }
@@ -123,7 +160,7 @@ struct PencilCanvas: UIViewRepresentable {
 	final class Coordinator: NSObject, PKCanvasViewDelegate {
 		let store: CanvasStore
 		var pageID: UUID?
-		var picker: PKToolPicker?
+		var tool: CanvasTool?
 		let onScroll: (CGPoint) -> Void
 
 		init(store: CanvasStore, onScroll: @escaping (CGPoint) -> Void) {

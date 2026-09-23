@@ -11,6 +11,7 @@ struct CanvasTabView: View {
 	@StateObject private var canvas: CanvasStore
 	@State private var pageIndex = 0
 	@State private var penOn: Bool
+	@State private var tool: CanvasTool = .pen(0)
 	@State private var importing = false
 	/// 上次停的頁只在第一次出現時拉回來，之後切分頁回來維持當下
 	@State private var restoredPage = false
@@ -94,19 +95,13 @@ struct CanvasTabView: View {
 
 	private var paper: some View {
 		PencilCanvas(
-			pageID: page.id, store: canvas, interactive: !selecting, penOn: penOn,
+			pageID: page.id, store: canvas, interactive: !selecting, penOn: penOn, tool: tool,
 			background: canvas.backgroundImage(for: page), handle: handle,
 			onScroll: { scrollOffset = $0 })
 			.overlay { blockMarks }
 			.overlay { if selecting { selectionLayer } }
-			// 左上角：工具列跟 iPad 的分頁列同一排，放進去會被壓成圖示；底部又有系統筆工具列
-			.overlay(alignment: .topLeading) {
-				HStack(spacing: 8) {
-					penButton
-					selectButton
-				}
-				.padding(12)
-			}
+			// 紙頂一條細工具列：頂端那排跟 iPad 的分頁列同一排，放不下
+			.overlay(alignment: .top) { penBar.padding(.top, 2).padding(.horizontal, 12) }
 			.ignoresSafeArea(.keyboard)
 	}
 
@@ -125,21 +120,88 @@ struct CanvasTabView: View {
 		Button("匯入講義", systemImage: "square.and.arrow.down") { importing = true }
 	}
 
-	/// 筆工具列出不出來只看這顆：關了工具列收掉、Pencil 不畫線、手指捲紙。
-	/// 放紙左上跟圈選並排：工具列那排再多一顆，新增頁和匯入就被擠進「⋯」
-	private var penButton: some View {
-		Button {
-			penOn.toggle()
-			store.canvasPenOn = penOn
-		} label: {
-			Label(penOn ? "收起筆" : "拿筆", systemImage: penOn ? "pencil.slash" : "pencil")
-				.font(.subheadline.weight(.semibold))
-				.padding(.horizontal, 6)
-				.padding(.vertical, 4)
+	/// 紙頂的細工具列（照 Derive）：拿筆／收起筆、三色筆、螢光筆、橡皮擦、套索、復原重做、圈一題。
+	/// 筆收起來只剩「拿筆」和「圈一題」；圈選中只剩「取消圈選」
+	private var penBar: some View {
+		// 放得下就置中；樹欄開著放不下時筆那段左右滑，「圈一題」固定在右邊不被擠出去
+		ViewThatFits(in: .horizontal) {
+			barCapsule {
+				penTools
+				if !selecting { barDivider }
+				selectButton
+			}
+			HStack(spacing: 6) {
+				if !selecting {
+					ScrollView(.horizontal, showsIndicators: false) { barCapsule { penTools } }
+				}
+				barCapsule { selectButton }
+			}
 		}
-		.buttonStyle(.bordered)
-		.buttonBorderShape(.capsule)
-		.disabled(selecting)
+	}
+
+	private func barCapsule(@ViewBuilder _ content: () -> some View) -> some View {
+		HStack(spacing: 2, content: content)
+			.padding(.horizontal, 6)
+			.padding(.vertical, 4)
+			.background(.regularMaterial, in: Capsule())
+			.overlay(Capsule().strokeBorder(Color(.separator).opacity(0.4)))
+			.shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+			.padding(.vertical, 8)
+	}
+
+	/// 筆那段；圈選中整段收掉只留「取消圈選」
+	@ViewBuilder
+	private var penTools: some View {
+		if !selecting {
+			barButton(penOn ? "收起筆" : "拿筆", systemImage: penOn ? "pencil.slash" : "pencil", selected: false) {
+				penOn.toggle()
+				store.canvasPenOn = penOn
+			}
+			if penOn {
+				barDivider
+				ForEach(CanvasTool.penColors.indices, id: \.self) { index in
+					barButton("筆", systemImage: "pencil.tip", selected: tool == .pen(index),
+						dot: Color(CanvasTool.penColors[index])) { tool = .pen(index) }
+				}
+				barButton("螢光筆", systemImage: "highlighter", selected: tool == .marker, dot: .yellow) {
+					tool = .marker
+				}
+				barButton("橡皮擦", systemImage: "eraser", selected: tool == .eraser) { tool = .eraser }
+				barButton("套索", systemImage: "lasso", selected: tool == .lasso) { tool = .lasso }
+				barDivider
+				barButton("復原", systemImage: "arrow.uturn.backward", selected: false) {
+					handle.view?.undoManager?.undo()
+				}
+				barButton("重做", systemImage: "arrow.uturn.forward", selected: false) {
+					handle.view?.undoManager?.redo()
+				}
+			}
+		}
+	}
+
+	/// 工具列上一顆圖示鈕：選中的墊灰底，筆類底下一個顏色點
+	private func barButton(
+		_ title: String, systemImage: String, selected: Bool, dot: Color? = nil,
+		action: @escaping () -> Void
+	) -> some View {
+		Button(action: action) {
+			Image(systemName: systemImage)
+				.font(.system(size: 16, weight: .medium))
+				.frame(width: 34, height: 30)
+				.overlay(alignment: .bottomTrailing) {
+					if let dot {
+						Circle().fill(dot).frame(width: 6, height: 6).offset(x: -5, y: -1)
+					}
+				}
+				.background(selected ? Color(.systemGray5) : .clear, in: RoundedRectangle(cornerRadius: 8))
+		}
+		.buttonStyle(.plain)
+		.foregroundStyle(.primary)
+		.accessibilityLabel(title)
+	}
+
+	private var barDivider: some View {
+		Divider().frame(height: 20).padding(.horizontal, 4)
 	}
 
 	/// 切「圈一題來問」模式
@@ -150,12 +212,12 @@ struct CanvasTabView: View {
 		} label: {
 			Label(selecting ? "取消圈選" : "圈一題來問", systemImage: selecting ? "xmark" : "rectangle.dashed")
 				.font(.subheadline.weight(.semibold))
-				.padding(.horizontal, 6)
-				.padding(.vertical, 4)
+				.padding(.horizontal, 10)
+				.padding(.vertical, 5)
+				.foregroundStyle(selecting ? Color.primary : Color.white)
+				.background(selecting ? Color(.systemGray5) : Color.accentColor, in: Capsule())
 		}
-		.buttonStyle(.borderedProminent)
-		.buttonBorderShape(.capsule)
-		.tint(selecting ? .secondary : .accentColor)
+		.buttonStyle(.plain)
 		.disabled(asking != nil)
 	}
 
