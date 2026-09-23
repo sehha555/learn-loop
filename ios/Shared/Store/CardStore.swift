@@ -120,6 +120,12 @@ final class CardStore: ObservableObject {
 		set { defaults.set(newValue, forKey: "canvasPanelOnLeft") }
 	}
 
+	/// 畫布分頁：筆開著（出筆工具列、Pencil 畫線）還是關著（只看、手指捲）。沒設過＝開
+	var canvasPenOn: Bool {
+		get { defaults.object(forKey: "canvasPenOn") as? Bool ?? true }
+		set { defaults.set(newValue, forKey: "canvasPenOn") }
+	}
+
 	/// 畫布分頁：上次停在哪一頁（存頁的 id，插頁之後索引會變）
 	var canvasPageID: String {
 		get { defaults.string(forKey: "canvasPageID") ?? "" }

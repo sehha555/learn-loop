@@ -10,6 +10,7 @@ struct CanvasTabView: View {
 	@ObservedObject var store: CardStore
 	@StateObject private var canvas: CanvasStore
 	@State private var pageIndex = 0
+	@State private var penOn: Bool
 	@State private var importing = false
 	/// 上次停的頁只在第一次出現時拉回來，之後切分頁回來維持當下
 	@State private var restoredPage = false
@@ -39,6 +40,7 @@ struct CanvasTabView: View {
 	init(store: CardStore) {
 		self.store = store
 		_canvas = StateObject(wrappedValue: CanvasStore(dataDir: store.dataDir))
+		_penOn = State(initialValue: store.canvasPenOn)
 		_panelOnLeft = State(initialValue: store.canvasPanelOnLeft)
 		let saved = store.canvasPanelWidth
 		_panelWidth = State(initialValue: saved > 0 ? CGFloat(saved) : Self.defaultPanelWidth)
@@ -92,13 +94,19 @@ struct CanvasTabView: View {
 
 	private var paper: some View {
 		PencilCanvas(
-			pageID: page.id, store: canvas, interactive: !selecting,
+			pageID: page.id, store: canvas, interactive: !selecting, penOn: penOn,
 			background: canvas.backgroundImage(for: page), handle: handle,
 			onScroll: { scrollOffset = $0 })
 			.overlay { blockMarks }
 			.overlay { if selecting { selectionLayer } }
 			// 左上角：工具列跟 iPad 的分頁列同一排，放進去會被壓成圖示；底部又有系統筆工具列
-			.overlay(alignment: .topLeading) { selectButton.padding(12) }
+			.overlay(alignment: .topLeading) {
+				HStack(spacing: 8) {
+					penButton
+					selectButton
+				}
+				.padding(12)
+			}
 			.ignoresSafeArea(.keyboard)
 	}
 
@@ -115,6 +123,23 @@ struct CanvasTabView: View {
 			.disabled(pageIndex >= canvas.pages.count - 1)
 		Button("新增頁", systemImage: "plus") { pageIndex = canvas.addPage(after: pageIndex) }
 		Button("匯入講義", systemImage: "square.and.arrow.down") { importing = true }
+	}
+
+	/// 筆工具列出不出來只看這顆：關了工具列收掉、Pencil 不畫線、手指捲紙。
+	/// 放紙左上跟圈選並排：工具列那排再多一顆，新增頁和匯入就被擠進「⋯」
+	private var penButton: some View {
+		Button {
+			penOn.toggle()
+			store.canvasPenOn = penOn
+		} label: {
+			Label(penOn ? "收起筆" : "拿筆", systemImage: penOn ? "pencil.slash" : "pencil")
+				.font(.subheadline.weight(.semibold))
+				.padding(.horizontal, 6)
+				.padding(.vertical, 4)
+		}
+		.buttonStyle(.bordered)
+		.buttonBorderShape(.capsule)
+		.disabled(selecting)
 	}
 
 	/// 切「圈一題來問」模式
@@ -283,8 +308,8 @@ struct CanvasTabView: View {
 					panelOnLeft.toggle()
 					store.canvasPanelOnLeft = panelOnLeft
 				}
+				// 字跟「換到左右邊」一樣大：只放 X 太小，看不出能收
 				Button("收起", systemImage: "xmark") { openTopicID = nil }
-					.labelStyle(.iconOnly)
 			}
 			.font(.caption)
 			.foregroundStyle(.secondary)

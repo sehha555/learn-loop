@@ -7,9 +7,28 @@ final class CanvasHandle {
 }
 
 /// 底下墊一張講義的 PKCanvasView：底圖是 content 的一部分，跟筆跡一起捲；
-/// 內容高度跟著底圖長，講義比螢幕高就能往下捲著寫
+/// 內容高度跟著底圖或筆跡長：講義比螢幕高、或寫到底了，都能往下捲著寫
 final class PaperCanvasView: PKCanvasView {
 	private let backgroundView = UIImageView()
+	/// 筆開著：要當第一回應者，系統筆工具列才會出來。
+	/// 推概念頁再返回時 SwiftUI 不一定重叫 updateUIView，回到畫面上自己接回來
+	var wantsToolPicker = false {
+		didSet { syncFirstResponder() }
+	}
+
+	override func didMoveToWindow() {
+		super.didMoveToWindow()
+		syncFirstResponder()
+	}
+
+	private func syncFirstResponder() {
+		guard window != nil else { return }
+		if wantsToolPicker, !isFirstResponder {
+			DispatchQueue.main.async { self.becomeFirstResponder() }
+		} else if !wantsToolPicker, isFirstResponder {
+			resignFirstResponder()
+		}
+	}
 
 	var background: UIImage? {
 		didSet {
@@ -33,13 +52,17 @@ final class PaperCanvasView: PKCanvasView {
 
 	override func layoutSubviews() {
 		super.layoutSubviews()
-		guard let background, bounds.width > 0 else {
+		guard bounds.width > 0 else { return }
+		var height: CGFloat = 0
+		if let background {
+			height = bounds.width * background.size.height / max(background.size.width, 1)
+			backgroundView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
+		} else {
 			backgroundView.frame = .zero
-			return
 		}
-		let height = bounds.width * background.size.height / max(background.size.width, 1)
-		backgroundView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
-		contentSize = CGSize(width: bounds.width, height: max(height, bounds.height))
+		// 最後一筆底下永遠留一整個螢幕的空白：寫到被筆工具列蓋住的地方，往上捲就寫得到
+		let ink = drawing.bounds.isNull ? 0 : drawing.bounds.maxY
+		contentSize = CGSize(width: bounds.width, height: max(height, ink + bounds.height, bounds.height * 1.5))
 	}
 }
 
@@ -49,6 +72,8 @@ struct PencilCanvas: UIViewRepresentable {
 	let pageID: UUID
 	@ObservedObject var store: CanvasStore
 	var interactive: Bool
+	/// 筆開著才畫得出線、才出筆工具列；關著時手指捲紙看內容
+	var penOn: Bool
 	var background: UIImage?
 	/// 讓 SwiftUI 那邊拿得到活的 canvas（圈選時要當下的筆跡與捲動位置，不能等存檔）
 	let handle: CanvasHandle
@@ -69,12 +94,10 @@ struct PencilCanvas: UIViewRepresentable {
 		view.delegate = context.coordinator
 		view.drawing = store.drawing(for: pageID)
 		context.coordinator.pageID = pageID
-		// 系統的筆工具列：跟著 canvas 當第一回應者出現，離開這頁自動收
+		// 系統的筆工具列：跟著 canvas 當第一回應者出現。出不出來只看筆開關（updateUIView）
 		let picker = PKToolPicker()
 		picker.addObserver(view)
-		picker.setVisible(true, forFirstResponder: view)
 		context.coordinator.picker = picker
-		DispatchQueue.main.async { view.becomeFirstResponder() }
 		return view
 	}
 
@@ -86,7 +109,13 @@ struct PencilCanvas: UIViewRepresentable {
 		}
 		if view.background !== background { view.background = background }
 		view.isUserInteractionEnabled = interactive
-		if interactive, !view.isFirstResponder { view.becomeFirstResponder() }
+		// 圈選中也收工具列：那時紙不收觸控
+		let writing = interactive && penOn
+		view.drawingGestureRecognizer.isEnabled = writing
+		// 手指也能畫（模擬器）時 PencilKit 把捲動改成兩指；筆收起來就該一指捲
+		view.panGestureRecognizer.minimumNumberOfTouches = writing && view.drawingPolicy == .anyInput ? 2 : 1
+		context.coordinator.picker?.setVisible(writing, forFirstResponder: view)
+		view.wantsToolPicker = writing
 	}
 
 	func makeCoordinator() -> Coordinator { Coordinator(store: store, onScroll: onScroll) }
@@ -109,6 +138,8 @@ struct PencilCanvas: UIViewRepresentable {
 		}
 
 		func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+			// 寫到底了紙要跟著長
+			canvasView.setNeedsLayout()
 			guard let pageID else { return }
 			store.saveDrawing(canvasView.drawing, for: pageID)
 		}
