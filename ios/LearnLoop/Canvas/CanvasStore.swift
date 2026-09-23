@@ -14,6 +14,8 @@ final class CanvasStore: ObservableObject {
 	private let filesDir: URL
 	/// 筆跡存檔延後半秒：每一筆都寫檔太兇，停筆才寫
 	private var pendingSaves: [UUID: Task<Void, Never>] = [:]
+	/// 還沒寫下去的筆跡：app 進背景時要立刻補寫，不然這半秒內被砍就丟筆畫
+	private var pendingData: [UUID: Data] = [:]
 	/// 底圖渲染很貴（PDF 一頁畫成 2388px 寬），翻回來不重畫
 	private var backgroundCache: [String: UIImage] = [:]
 
@@ -57,13 +59,26 @@ final class CanvasStore: ObservableObject {
 
 	func saveDrawing(_ drawing: PKDrawing, for pageID: UUID) {
 		pendingSaves[pageID]?.cancel()
-		let data = drawing.dataRepresentation()
-		let url = drawingURL(pageID)
+		pendingData[pageID] = drawing.dataRepresentation()
 		pendingSaves[pageID] = Task {
 			try? await Task.sleep(for: .milliseconds(500))
 			guard !Task.isCancelled else { return }
-			try? data.write(to: url, options: .atomic)
+			writePending(pageID)
 		}
+	}
+
+	/// 還在等半秒的全部馬上寫（app 要進背景了）
+	func flushSaves() {
+		for (pageID, task) in pendingSaves {
+			task.cancel()
+			writePending(pageID)
+		}
+		pendingSaves = [:]
+	}
+
+	private func writePending(_ pageID: UUID) {
+		guard let data = pendingData.removeValue(forKey: pageID) else { return }
+		try? data.write(to: drawingURL(pageID), options: .atomic)
 	}
 
 	// MARK: - 頁與塊

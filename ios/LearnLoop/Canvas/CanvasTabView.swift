@@ -11,6 +11,11 @@ struct CanvasTabView: View {
 	@StateObject private var canvas: CanvasStore
 	@State private var pageIndex = 0
 	@State private var importing = false
+	/// 上次停的頁只在第一次出現時拉回來，之後切分頁回來維持當下
+	@State private var restoredPage = false
+	/// 紙目前捲到哪：標記照這個位移，跟筆跡一起動
+	@State private var scrollOffset: CGPoint = .zero
+	@Environment(\.scenePhase) private var scenePhase
 	private let handle = CanvasHandle()
 
 	// 圈選
@@ -62,6 +67,17 @@ struct CanvasTabView: View {
 			.conceptDestinations(store: store) { path.append($0) }
 		}
 		.errorAlert($errorText)
+		.onAppear {
+			guard !restoredPage else { return }
+			restoredPage = true
+			if let saved = canvas.pages.firstIndex(where: { $0.id.uuidString == store.canvasPageID }) {
+				pageIndex = saved
+			}
+		}
+		.onChange(of: pageIndex) { store.canvasPageID = page.id.uuidString }
+		.onChange(of: scenePhase) { _, phase in
+			if phase != .active { canvas.flushSaves() }
+		}
 		// 講義當底：PDF 每頁一張紙、圖片一張紙，插在目前頁後面
 		.fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .image]) { result in
 			do {
@@ -77,7 +93,8 @@ struct CanvasTabView: View {
 	private var paper: some View {
 		PencilCanvas(
 			pageID: page.id, store: canvas, interactive: !selecting,
-			background: canvas.backgroundImage(for: page), handle: handle)
+			background: canvas.backgroundImage(for: page), handle: handle,
+			onScroll: { scrollOffset = $0 })
 			.overlay { blockMarks }
 			.overlay { if selecting { selectionLayer } }
 			// 左上角：工具列跟 iPad 的分頁列同一排，放進去會被壓成圖示；底部又有系統筆工具列
@@ -217,7 +234,7 @@ struct CanvasTabView: View {
 	/// 每個問過的塊：淡色框＋左上編號。這一題藍、其他紅；點編號切到那棵樹。
 	/// 框本身不吃觸控，筆照畫
 	private var blockMarks: some View {
-		let offset = handle.view?.contentOffset ?? .zero
+		let offset = scrollOffset
 		return ZStack(alignment: .topLeading) {
 			ForEach(Array(page.blocks.enumerated()), id: \.element.id) { index, block in
 				let rect = block.rect.offsetBy(dx: -offset.x, dy: -offset.y)

@@ -52,6 +52,8 @@ struct PencilCanvas: UIViewRepresentable {
 	var background: UIImage?
 	/// 讓 SwiftUI 那邊拿得到活的 canvas（圈選時要當下的筆跡與捲動位置，不能等存檔）
 	let handle: CanvasHandle
+	/// 捲動時回報位置：紙上的編號標記要跟著筆跡一起動
+	var onScroll: (CGPoint) -> Void = { _ in }
 
 	func makeUIView(context: Context) -> PaperCanvasView {
 		let view = PaperCanvasView()
@@ -87,14 +89,24 @@ struct PencilCanvas: UIViewRepresentable {
 		if interactive, !view.isFirstResponder { view.becomeFirstResponder() }
 	}
 
-	func makeCoordinator() -> Coordinator { Coordinator(store: store) }
+	func makeCoordinator() -> Coordinator { Coordinator(store: store, onScroll: onScroll) }
 
 	final class Coordinator: NSObject, PKCanvasViewDelegate {
 		let store: CanvasStore
 		var pageID: UUID?
 		var picker: PKToolPicker?
+		let onScroll: (CGPoint) -> Void
 
-		init(store: CanvasStore) { self.store = store }
+		init(store: CanvasStore, onScroll: @escaping (CGPoint) -> Void) {
+			self.store = store
+			self.onScroll = onScroll
+		}
+
+		func scrollViewDidScroll(_ scrollView: UIScrollView) {
+			// 換頁時 updateUIView 裡歸零也會觸發，那時候不能直接改 SwiftUI 狀態
+			let offset = scrollView.contentOffset
+			DispatchQueue.main.async { self.onScroll(offset) }
+		}
 
 		func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
 			guard let pageID else { return }

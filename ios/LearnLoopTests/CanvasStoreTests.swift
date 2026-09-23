@@ -1,4 +1,5 @@
 import PDFKit
+import PencilKit
 import XCTest
 
 @testable import LearnLoop
@@ -66,5 +67,23 @@ final class CanvasStoreTests: XCTestCase {
 		XCTAssertEqual(hit?.page.id, pageID)
 		XCTAssertEqual(hit?.block.rect, CGRect(x: 10, y: 20, width: 300, height: 120))
 		XCTAssertEqual(hit?.block.cardID, cardID)
+	}
+
+	/// 停筆後的半秒內 app 進背景：flushSaves 要馬上落地，不等計時器
+	@MainActor
+	func testFlushSavesWritesPendingDrawingImmediately() {
+		let dir = tempDir()
+		let store = CanvasStore(dataDir: dir)
+		let pageID = store.pages[0].id
+		let ink = PKInk(.pen, color: .black)
+		let points = [CGPoint(x: 10, y: 10), CGPoint(x: 200, y: 80)].map {
+			PKStrokePoint(location: $0, timeOffset: 0, size: CGSize(width: 3, height: 3),
+				opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+		}
+		let drawing = PKDrawing(strokes: [PKStroke(ink: ink, path: PKStrokePath(controlPoints: points, creationDate: Date()))])
+		store.saveDrawing(drawing, for: pageID)
+		XCTAssertTrue(CanvasStore(dataDir: dir).drawing(for: pageID).strokes.isEmpty, "還在等半秒，檔案不該已經寫了")
+		store.flushSaves()
+		XCTAssertEqual(CanvasStore(dataDir: dir).drawing(for: pageID).strokes.count, 1)
 	}
 }

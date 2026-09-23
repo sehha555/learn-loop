@@ -120,6 +120,12 @@ final class CardStore: ObservableObject {
 		set { defaults.set(newValue, forKey: "canvasPanelOnLeft") }
 	}
 
+	/// 畫布分頁：上次停在哪一頁（存頁的 id，插頁之後索引會變）
+	var canvasPageID: String {
+		get { defaults.string(forKey: "canvasPageID") ?? "" }
+		set { defaults.set(newValue, forKey: "canvasPageID") }
+	}
+
 	/// 畫布分頁：樹欄寬度（pt）。0 = 沒拖過，用預設
 	var canvasPanelWidth: Double {
 		get { defaults.double(forKey: "canvasPanelWidth") }
