@@ -17,6 +17,7 @@ extension AIClient {
 		var request = URLRequest(url: relay.appending(path: "call"))
 		request.httpMethod = "POST"
 		request.setValue("application/json", forHTTPHeaderField: "content-type")
+		request.setValue(relayToken, forHTTPHeaderField: "X-Relay-Token")
 		request.timeoutInterval = 180
 		var body: [String: Any] = ["prompt": text, "schema": schema]
 		if let imageBase64 { body["image_base64"] = imageBase64 }

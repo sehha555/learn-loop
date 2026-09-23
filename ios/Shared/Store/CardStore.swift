@@ -85,6 +85,12 @@ final class CardStore: ObservableObject {
 		set { defaults.set(newValue, forKey: "relayAddress") }
 	}
 
+	/// 中繼站密語：Mac 上 server.py 啟動時印的那串，沒帶會被擋（401）
+	var relayToken: String {
+		get { defaults.string(forKey: "relayToken") ?? "" }
+		set { defaults.set(newValue, forKey: "relayToken") }
+	}
+
 	/// 設定頁填的是「機器名」或「機器名:port」，這裡補上 scheme 和預設 port
 	var relayURL: URL? {
 		let raw = relayAddress.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -98,7 +104,7 @@ final class CardStore: ObservableObject {
 	var hasProvider: Bool { !apiKey.isEmpty || relayURL != nil }
 
 	/// 打模型一律從這拿 client，中繼站設定才不會漏帶
-	var ai: AIClient { AIClient(apiKey: apiKey, relay: relayURL) }
+	var ai: AIClient { AIClient(apiKey: apiKey, relay: relayURL, relayToken: relayToken) }
 
 	/// 教學口吻，設定頁切換
 	var teachingStyle: TeachingStyle {

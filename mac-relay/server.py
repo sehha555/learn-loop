@@ -12,9 +12,11 @@ prompt 和輸出格式（JSON Schema）都由 app 端決定，這裡只轉手不
 """
 
 import base64
+import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -36,6 +38,9 @@ FILES_TIMEOUT = 540
 # 建法：python3 -m venv "$FIGURE_PYTHON 的上兩層" && .../bin/python -m pip install matplotlib
 FIGURE_PYTHON = os.path.expanduser("~/Library/Application Support/learn-loop/venv/bin/python")
 FIGURE_TIMEOUT = 30
+# 通關密語：同一個 Wi-Fi 的任何人都連得到 8787，沒密語就能用這台 Mac 的 claude 額度、
+# 讀 /log 的學習紀錄。第一次啟動自動產生，iPad 設定頁填一樣的；Mac 自己開 log 頁不用
+TOKEN_FILE = os.path.expanduser("~/Library/Application Support/learn-loop/relay-token")
 # 模型給的畫圖程式前面接這段：不開視窗、中文字型、統一尺寸；後面接存檔
 FIGURE_PRELUDE = '''
 import matplotlib
@@ -238,7 +243,34 @@ def record_call(prompt: str, has_image: bool, result: dict, seconds: float) -> N
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+def load_token() -> str:
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE) as f:
+            token = f.read().strip()
+        if token:
+            return token
+    # 8 個字：iPad 上手打得完，區網猜不完
+    token = secrets.token_urlsafe(6)
+    os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+    with open(TOKEN_FILE, "w") as f:
+        f.write(token)
+    os.chmod(TOKEN_FILE, 0o600)
+    return token
+
+
+TOKEN = load_token()
+
+
 class Handler(BaseHTTPRequestHandler):
+    def _authorized(self) -> bool:
+        """Mac 自己打的（log 頁）免密語；其他來源要帶 X-Relay-Token"""
+        if self.client_address[0] in ("127.0.0.1", "::1"):
+            return True
+        return hmac.compare_digest(self.headers.get("X-Relay-Token", ""), TOKEN)
+
+    def _reject(self) -> None:
+        self._respond(401, {"error": "中繼站密語不對：iPad 設定頁填 Mac 上 server.py 啟動時印的那串"})
+
     def _respond(self, code: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(code)
@@ -249,8 +281,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # app 用這個快速確認 Mac 醒著，2 秒內沒回就退回 Gemini
     def do_GET(self):
+        # /health 不擋：只回「醒著」，沒有資料
         if self.path == "/health":
             self._respond(200, {"ok": True})
+        elif not self._authorized():
+            self._reject()
         # log 頁：看模型每次收到什麼、回了什麼，拿來調 prompt。瀏覽器開 /log/ui
         elif self.path.startswith("/log/ui"):
             with open(os.path.join(os.path.dirname(__file__), "log_ui.html"), "rb") as f:
@@ -268,6 +303,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/call":
             self._respond(404, {"error": "not found"})
+            return
+        if not self._authorized():
+            self._reject()
             return
         started = time.monotonic()
         # 開始就印一行：標準 log 是回應完才寫，看 log 尾巴會以為沒人在算，
@@ -326,4 +364,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"learn-loop 中繼站跑起來了，port {PORT}（Ctrl+C 停止）")
+    print(f"iPad 設定頁的中繼站密語：{TOKEN}")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

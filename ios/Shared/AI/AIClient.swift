@@ -27,6 +27,8 @@ struct AIClient {
 	let apiKey: String
 	/// Mac 中繼站（走 Claude Code 訂閱）。有設就優先走它，失敗自動退回雲端 API
 	var relay: URL? = nil
+	/// 中繼站密語（Mac 上 server.py 啟動時印的那串），放在 X-Relay-Token
+	var relayToken = ""
 	/// 送請求的管道。主 app 啟動時換成 background（見 AITransport），分享浮層用預設
 	nonisolated(unsafe) static var transport: AITransport = .foreground
 

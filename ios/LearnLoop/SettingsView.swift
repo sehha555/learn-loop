@@ -5,6 +5,7 @@ struct SettingsView: View {
 	@Environment(\.dismiss) private var dismiss
 	@State private var key = ""
 	@State private var relayAddress = ""
+	@State private var relayToken = ""
 	@State private var style: TeachingStyle = .direct
 
 	var body: some View {
@@ -24,10 +25,13 @@ struct SettingsView: View {
 						.textInputAutocapitalization(.never)
 						.autocorrectionDisabled()
 						.keyboardType(.URL)
+					TextField("密語", text: $relayToken)
+						.textInputAutocapitalization(.never)
+						.autocorrectionDisabled()
 				} header: {
 					Text("Mac 中繼站（選填）")
 				} footer: {
-					Text("Mac 上先跑 mac-relay/server.py，這裡填 Mac 的名字，就會優先用 Claude Code 訂閱、不吃 API。同一個 Wi-Fi 填「名字.local」；裝了 Tailscale 填它給的機器名，在外面也通。連不上會自動改用上面的 key。")
+					Text("Mac 上先跑 mac-relay/server.py，這裡填 Mac 的名字，就會優先用 Claude Code 訂閱、不吃 API。同一個 Wi-Fi 填「名字.local」；裝了 Tailscale 填它給的機器名，在外面也通。密語是 server.py 啟動時印的那串，擋掉同一個網路的其他人。連不上會自動改用上面的 key。")
 				}
 				Section {
 					Picker("口吻", selection: $style) {
@@ -56,6 +60,7 @@ struct SettingsView: View {
 					Button("完成") {
 						store.apiKey = key
 						store.relayAddress = relayAddress
+						store.relayToken = relayToken.trimmingCharacters(in: .whitespacesAndNewlines)
 						store.teachingStyle = style
 						dismiss()
 					}
@@ -64,6 +69,7 @@ struct SettingsView: View {
 			.onAppear {
 				key = store.apiKey
 				relayAddress = store.relayAddress
+				relayToken = store.relayToken
 				style = store.teachingStyle
 			}
 		}
