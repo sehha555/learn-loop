@@ -26,14 +26,14 @@ struct LearnLoopApp: App {
 			// 題目和概念是兩個平等的視角，用 tab 一點就切 ——
 			// 藏在 toolbar 按鈕裡要推頁面進出，概念那頁就不會有人去看
 			TabView {
+				LibraryView(store: store)
+					.tabItem { Label("書架", systemImage: "books.vertical") }
 				TopicListView(store: store)
 					.tabItem { Label("題目", systemImage: "list.bullet") }
 				AskTabView(store: store)
 					.tabItem { Label("概念", systemImage: "tag") }
 				ExamListView(store: store)
 					.tabItem { Label("考試", systemImage: "calendar") }
-				CanvasTabView(store: store)
-					.tabItem { Label("畫布", systemImage: "pencil.and.outline") }
 			}
 			// 舊題補抄題目原文，背景跑、跑完清單自己更新
 			.task {

@@ -297,6 +297,20 @@ final class CanvasStore: ObservableObject {
 		}
 	}
 
+	/// 封面、頁面總覽用的小圖：白底＋底圖＋筆跡，寬 width pt
+	func thumbnail(for page: CanvasPage, width: CGFloat) -> UIImage {
+		let scale = width / max(page.size.width, 1)
+		let size = CGSize(width: width, height: page.size.height * scale)
+		let ink = (pendingData[page.id].flatMap { try? PKDrawing(data: $0) } ?? drawing(for: page.id))
+			.image(from: CGRect(origin: .zero, size: page.size), scale: scale * UIScreen.main.scale)
+		return UIGraphicsImageRenderer(size: size).image { context in
+			UIColor.white.setFill()
+			context.fill(CGRect(origin: .zero, size: size))
+			backgroundImage(for: page)?.draw(in: CGRect(origin: .zero, size: size))
+			ink.draw(in: CGRect(origin: .zero, size: size))
+		}
+	}
+
 	/// 這一頁的底圖（沒匯入就 nil）
 	func backgroundImage(for page: CanvasPage) -> UIImage? {
 		guard let background = page.background else { return nil }

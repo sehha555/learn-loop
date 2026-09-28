@@ -2,15 +2,16 @@ import PencilKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 畫布 tab：在 app 裡直接手寫（取代 GoodNotes 的第一步）。
+/// 一份材料的畫布：在 app 裡直接手寫（取代 GoodNotes 的第一步），從書架點進來。
 /// 卡住時切「圈一題來問」拉一個框、按「問這一題」，框裡的筆跡走既有的 ingest；
 /// 送出後紙留一邊、樹開另一邊，手不用離開紙。每個問過的塊在紙上留編號標記，點了切到那棵樹。
 /// 樹欄可以拖寬、可以換邊（左撇子）
-struct CanvasTabView: View {
+struct MaterialView: View {
 	@ObservedObject var store: CardStore
-	@StateObject private var canvas: CanvasStore
-	/// 正在寫的材料（書架出來之前先固定開上次那份）
-	@State private var materialID: UUID?
+	@ObservedObject var canvas: CanvasStore
+	let materialID: UUID
+	/// 書架那層的導覽路徑：概念 chip 的跳轉也推在這上面
+	@Binding var path: NavigationPath
 	@State private var pageIndex = 0
 	@State private var penOn: Bool
 	@State private var tool: CanvasTool = .pen(0)
@@ -23,9 +24,8 @@ struct CanvasTabView: View {
 	@State private var shapeKind: ShapeKind = .line
 	@State private var shapeMenu = false
 	@State private var importing = false
-	/// 上次停的頁只在第一次出現時拉回來，之後切分頁回來維持當下
+	/// 上次停的頁只在第一次出現時拉回來
 	@State private var restoredPage = false
-	@Environment(\.scenePhase) private var scenePhase
 	private let handle = CanvasHandle()
 
 	// 圈選
@@ -38,7 +38,6 @@ struct CanvasTabView: View {
 
 	// 樹欄
 	@State private var openTopicID: UUID?
-	@State private var path = NavigationPath()
 	@State private var panelOnLeft: Bool
 	@State private var panelWidth: CGFloat
 	@State private var dragBaseWidth: CGFloat?
@@ -46,9 +45,11 @@ struct CanvasTabView: View {
 	private static let defaultPanelWidth: CGFloat = 440
 	private static let panelRange: ClosedRange<CGFloat> = 320...640
 
-	init(store: CardStore) {
+	init(store: CardStore, canvas: CanvasStore, materialID: UUID, path: Binding<NavigationPath>) {
 		self.store = store
-		_canvas = StateObject(wrappedValue: CanvasStore(dataDir: store.dataDir))
+		self.canvas = canvas
+		self.materialID = materialID
+		_path = path
 		_penOn = State(initialValue: store.canvasPenOn)
 		var tools = CanvasToolSettings()
 		if store.canvasPenWidth > 0 { tools.penWidth = CGFloat(store.canvasPenWidth) }
@@ -60,50 +61,44 @@ struct CanvasTabView: View {
 		_panelWidth = State(initialValue: saved > 0 ? CGFloat(saved) : Self.defaultPanelWidth)
 	}
 
-	private var pages: [CanvasPage] { materialID.flatMap { canvas.material($0) }?.pages ?? [] }
+	private var pages: [CanvasPage] { canvas.material(materialID)?.pages ?? [] }
 
 	var body: some View {
-		// 外層一個 NavigationStack：撐住頂端安全區（分頁列底下），概念 chip 的跳轉也走它（整頁推入，跟別的分頁一樣）
-		NavigationStack(path: $path) {
-			HStack(spacing: 0) {
-				if openTopicID != nil, panelOnLeft {
-					panel
-					divider
-				}
-				paper
-				if openTopicID != nil, !panelOnLeft {
-					divider
-					panel
-				}
+		HStack(spacing: 0) {
+			if openTopicID != nil, panelOnLeft {
+				panel
+				divider
 			}
-			.navigationBarTitleDisplayMode(.inline)
-			.toolbar {
-				ToolbarItemGroup(placement: .primaryAction) { pageControls }
+			paper
+			if openTopicID != nil, !panelOnLeft {
+				divider
+				panel
 			}
-			.conceptDestinations(store: store) { path.append($0) }
+		}
+		.navigationTitle(canvas.material(materialID)?.name ?? "")
+		.navigationBarTitleDisplayMode(.inline)
+		.toolbar {
+			ToolbarItemGroup(placement: .primaryAction) { pageControls }
 		}
 		.errorAlert($errorText)
 		.onAppear {
 			guard !restoredPage else { return }
 			restoredPage = true
-			let saved = UUID(uuidString: store.canvasPageID).flatMap(canvas.material(containing:))
-			let material = saved ?? canvas.library.materials.first ?? canvas.createNotebook(named: "筆記本", in: nil)
-			materialID = material.id
-			if let index = material.pages.firstIndex(where: { $0.id.uuidString == store.canvasPageID }) {
+			if let index = pages.firstIndex(where: { $0.id.uuidString == store.canvasPageID }) {
 				pageIndex = index
 				handle.stack?.scroll(toPage: index)
+			} else if let first = pages.first {
+				// 換了一份材料：沒捲動的話 pageIndex 不會變，先記下第一頁，下次才打開這份
+				store.canvasPageID = first.id.uuidString
 			}
 		}
 		.onChange(of: pageIndex) {
 			if pages.indices.contains(pageIndex) { store.canvasPageID = pages[pageIndex].id.uuidString }
 		}
-		.onChange(of: scenePhase) { _, phase in
-			if phase != .active { canvas.flushSaves() }
-		}
+		.onDisappear { canvas.flushSaves() }
 		// 講義當底：PDF 每頁一張紙、圖片一張紙，插在目前頁後面
 		.fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .image]) { result in
 			do {
-				guard let materialID else { return }
 				pageIndex = try canvas.insertFile(from: try result.get(), into: materialID, after: pageIndex)
 				handle.stack?.scroll(toPage: pageIndex)
 			} catch {
@@ -137,10 +132,8 @@ struct CanvasTabView: View {
 		Button("下一頁", systemImage: "chevron.right") { handle.stack?.scroll(toPage: pageIndex + 1) }
 			.disabled(pageIndex >= pages.count - 1)
 		Button("新增頁", systemImage: "plus") {
-			if let materialID {
-				pageIndex = canvas.addPage(to: materialID, after: pageIndex)
-				handle.stack?.scroll(toPage: pageIndex)
-			}
+			pageIndex = canvas.addPage(to: materialID, after: pageIndex)
+			handle.stack?.scroll(toPage: pageIndex)
 		}
 		Button("匯入講義", systemImage: "square.and.arrow.down") { importing = true }
 	}
