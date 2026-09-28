@@ -15,6 +15,8 @@ struct CanvasPage: Identifiable, Codable, Hashable {
 
 	/// 空白頁的預設大小：寬 768、A4 比例
 	static let blankSize = CGSize(width: 768, height: 1086)
+	/// 橫線頁的線距（頁內 pt）
+	static let lineSpacing: CGFloat = 36
 
 	init(
 		id: UUID = UUID(), createdAt: Date = Date(), blocks: [CanvasBlock] = [], background: CanvasBackground? = nil,

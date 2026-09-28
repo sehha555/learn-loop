@@ -24,9 +24,11 @@ struct MaterialView: View {
 	@State private var shapeKind: ShapeKind = .line
 	@State private var shapeMenu = false
 	@State private var importing = false
+	@State private var overview = false
 	/// 上次停的頁只在第一次出現時拉回來
 	@State private var restoredPage = false
-	private let handle = CanvasHandle()
+	/// 放 @State：書架那層重畫時這個 struct 會重建，handle 不能跟著換新（換了就連不到活的畫布）
+	@State private var handle = CanvasHandle()
 
 	// 圈選
 	@State private var selecting = false
@@ -81,6 +83,12 @@ struct MaterialView: View {
 			ToolbarItemGroup(placement: .primaryAction) { pageControls }
 		}
 		.errorAlert($errorText)
+		.sheet(isPresented: $overview) {
+			PageOverview(canvas: canvas, materialID: materialID) { index in
+				pageIndex = index
+				handle.stack?.scroll(toPage: index)
+			}
+		}
 		.onAppear {
 			guard !restoredPage else { return }
 			restoredPage = true
@@ -120,7 +128,7 @@ struct MaterialView: View {
 			.ignoresSafeArea(.keyboard)
 	}
 
-	/// 頁碼、翻頁、匯入，收在工具列右邊
+	/// 頁碼、翻頁、加頁、總覽，收在工具列右邊
 	@ViewBuilder
 	private var pageControls: some View {
 		Button("上一頁", systemImage: "chevron.left") { handle.stack?.scroll(toPage: pageIndex - 1) }
@@ -131,11 +139,20 @@ struct MaterialView: View {
 			.foregroundStyle(.secondary)
 		Button("下一頁", systemImage: "chevron.right") { handle.stack?.scroll(toPage: pageIndex + 1) }
 			.disabled(pageIndex >= pages.count - 1)
-		Button("新增頁", systemImage: "plus") {
-			pageIndex = canvas.addPage(to: materialID, after: pageIndex)
-			handle.stack?.scroll(toPage: pageIndex)
+		// 加在這頁後面（照 GoodNotes）
+		Menu {
+			Button("橫線頁", systemImage: "line.3.horizontal") { addPage(ruled: true) }
+			Button("空白頁", systemImage: "square") { addPage(ruled: false) }
+			Button("插入 PDF 講義", systemImage: "square.and.arrow.down") { importing = true }
+		} label: {
+			Label("加頁", systemImage: "plus")
 		}
-		Button("匯入講義", systemImage: "square.and.arrow.down") { importing = true }
+		Button("頁面總覽", systemImage: "square.grid.2x2") { overview = true }
+	}
+
+	private func addPage(ruled: Bool) {
+		pageIndex = canvas.addPage(to: materialID, after: pageIndex, ruled: ruled)
+		handle.stack?.scroll(toPage: pageIndex)
 	}
 
 	/// 紙頂的細工具列（照 Derive）：拿筆／收起筆、三色筆、螢光筆、橡皮擦、套索、復原重做、圈一題。

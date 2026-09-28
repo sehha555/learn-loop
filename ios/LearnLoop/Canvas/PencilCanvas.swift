@@ -132,7 +132,6 @@ enum ShapeKind: CaseIterable {
 
 /// 紙的白底＋淡橫線：跟內容一起捲，看得出寫到哪一行。墊講義的頁只留白底不畫線
 private final class RuledLinesView: UIView {
-	static let spacing: CGFloat = 36
 	var showsLines = true {
 		didSet { setNeedsDisplay() }
 	}
@@ -154,7 +153,7 @@ private final class RuledLinesView: UIView {
 		guard showsLines else { return }
 		UIColor.systemGray5.setStroke()
 		let path = UIBezierPath()
-		let spacing = Self.spacing * scale
+		let spacing = CanvasPage.lineSpacing * scale
 		var y = (rect.minY / spacing).rounded(.down) * spacing + spacing
 		while y <= rect.maxY {
 			path.move(to: CGPoint(x: rect.minX, y: y))

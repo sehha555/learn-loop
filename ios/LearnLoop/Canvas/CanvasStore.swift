@@ -306,7 +306,16 @@ final class CanvasStore: ObservableObject {
 		return UIGraphicsImageRenderer(size: size).image { context in
 			UIColor.white.setFill()
 			context.fill(CGRect(origin: .zero, size: size))
-			backgroundImage(for: page)?.draw(in: CGRect(origin: .zero, size: size))
+			if let background = backgroundImage(for: page) {
+				background.draw(in: CGRect(origin: .zero, size: size))
+			} else if page.ruled {
+				// 橫線頁跟空白頁在總覽裡要分得出來
+				UIColor.systemGray5.setFill()
+				let spacing = CanvasPage.lineSpacing * scale
+				for y in stride(from: spacing, to: size.height, by: spacing) {
+					context.fill(CGRect(x: 0, y: y, width: size.width, height: 1))
+				}
+			}
 			ink.draw(in: CGRect(origin: .zero, size: size))
 		}
 	}
