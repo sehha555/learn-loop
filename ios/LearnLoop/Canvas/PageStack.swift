@@ -5,11 +5,15 @@ import SwiftUI
 /// 每頁是固定大小的 PaperCanvasView，只有畫面附近的頁真的建出畫布，頁多也不卡
 final class PageStackView: UIScrollView, UIScrollViewDelegate, PKCanvasViewDelegate {
 	private let store: CanvasStore
+	/// 所有頁放在這一層裡：捏合時先整層縮放（便宜），放手才真的重排
+	private let content = UIView()
 	private(set) var pages: [CanvasPage] = []
 	private var slots: [UUID: PageSlot] = [:]
 	/// 放大倍數：1 = 頁寬貼齊畫面（左右留邊），兩指捏合最多放到 3 倍
 	private var zoom: CGFloat = 1
-	private var pinchBase: CGFloat = 1
+	private var pinchFocus: CGPoint = .zero
+	private var pinchOnScreen: CGPoint = .zero
+	private var lastReportedPage: Int?
 	private var laidOutWidth: CGFloat = 0
 	private var pendingScrollIndex: Int?
 
@@ -33,6 +37,7 @@ final class PageStackView: UIScrollView, UIScrollViewDelegate, PKCanvasViewDeleg
 		backgroundColor = .systemGroupedBackground
 		alwaysBounceVertical = true
 		contentInsetAdjustmentBehavior = .never
+		addSubview(content)
 		addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinch(_:))))
 	}
 
@@ -55,7 +60,7 @@ final class PageStackView: UIScrollView, UIScrollViewDelegate, PKCanvasViewDeleg
 				let slot = PageSlot(page: page)
 				slot.onOpenBlock = { [weak self] in self?.onOpenBlock($0) }
 				slots[page.id] = slot
-				addSubview(slot)
+				content.addSubview(slot)
 			}
 		}
 		relayout()
@@ -91,15 +96,15 @@ final class PageStackView: UIScrollView, UIScrollViewDelegate, PKCanvasViewDeleg
 
 	/// 圈選框（畫面座標）落在哪一頁、換成頁內座標；橫跨兩頁時算重疊比較多的那頁
 	func hit(_ rect: CGRect) -> (page: CanvasPage, rect: CGRect, drawing: PKDrawing, background: UIImage?)? {
-		let content = rect.offsetBy(dx: contentOffset.x, dy: contentOffset.y)
-		let best = pages.compactMap { page -> (CanvasPage, PageSlot, CGFloat)? in
+		let target = rect.offsetBy(dx: contentOffset.x, dy: contentOffset.y)
+		let best = pages.compactMap { page -> (CanvasPage, PageSlot, CGRect)? in
 			guard let slot = slots[page.id] else { return nil }
-			let overlap = slot.frame.intersection(content)
-			return overlap.isNull ? nil : (page, slot, overlap.width * overlap.height)
-		}.max { $0.2 < $1.2 }
-		guard let (page, slot, _) = best else { return nil }
+			let overlap = slot.frame.intersection(target)
+			return overlap.isNull ? nil : (page, slot, overlap)
+		}.max { $0.2.width * $0.2.height < $1.2.width * $1.2.height }
+		guard let (page, slot, overlap) = best else { return nil }
 		let scale = slot.scale
-		let local = slot.frame.intersection(content).offsetBy(dx: -slot.frame.minX, dy: -slot.frame.minY)
+		let local = overlap.offsetBy(dx: -slot.frame.minX, dy: -slot.frame.minY)
 		let pageRect = CGRect(x: local.minX / scale, y: local.minY / scale, width: local.width / scale, height: local.height / scale)
 		return (page, pageRect, slot.canvas?.drawing ?? store.drawing(for: page.id), store.backgroundImage(for: page))
 	}
@@ -127,6 +132,7 @@ final class PageStackView: UIScrollView, UIScrollViewDelegate, PKCanvasViewDeleg
 			y += size.height + Self.gap
 		}
 		contentSize = CGSize(width: max(bounds.width, widest + Self.margin * 2), height: y)
+		content.frame = CGRect(origin: .zero, size: contentSize)
 		updateLiveCanvases()
 		if let index = pendingScrollIndex {
 			pendingScrollIndex = nil
@@ -139,9 +145,11 @@ final class PageStackView: UIScrollView, UIScrollViewDelegate, PKCanvasViewDeleg
 		if bounds.width != laidOutWidth { relayout() }
 	}
 
-	/// 畫面上下各多一個螢幕高的頁建畫布，其他頁收掉（筆跡早就存了）
+	/// 畫面上下各多一個螢幕高的頁建畫布；離開兩個螢幕高才收掉（筆跡早就存了）。
+	/// 建和收的邊界錯開，在邊界附近來回捲不會一直重建
 	private func updateLiveCanvases() {
 		let live = bounds.insetBy(dx: 0, dy: -bounds.height)
+		let keep = bounds.insetBy(dx: 0, dy: -bounds.height * 2)
 		for page in pages {
 			guard let slot = slots[page.id] else { continue }
 			if slot.frame.intersects(live) {
@@ -163,7 +171,7 @@ final class PageStackView: UIScrollView, UIScrollViewDelegate, PKCanvasViewDeleg
 				}
 				canvas.apply(tool: tool, settings: settings, writing: writing)
 				slot.canvas = canvas
-			} else if slot.canvas != nil {
+			} else if slot.canvas != nil, !slot.frame.intersects(keep) {
 				slot.canvas = nil
 			}
 		}
@@ -171,7 +179,10 @@ final class PageStackView: UIScrollView, UIScrollViewDelegate, PKCanvasViewDeleg
 
 	private func reportCurrentPage() {
 		let probe = contentOffset.y + bounds.height * 0.3
-		guard let index = pages.firstIndex(where: { slots[$0.id].map { $0.frame.maxY + Self.gap > probe } ?? false }) else { return }
+		guard let index = pages.firstIndex(where: { slots[$0.id].map { $0.frame.maxY + Self.gap > probe } ?? false }),
+			index != lastReportedPage
+		else { return }
+		lastReportedPage = index
 		onCurrentPage(index)
 	}
 
@@ -182,26 +193,30 @@ final class PageStackView: UIScrollView, UIScrollViewDelegate, PKCanvasViewDeleg
 		reportCurrentPage()
 	}
 
-	/// 捏合時以兩指中間那點為準：放大後同一個內容點還在手指底下
+	/// 捏合時以兩指中間那點為準：放大後同一個內容點還在手指底下。
+	/// 手指還在動時只把整層縮放（畫面會暫時糊），放手才用新倍數重排、PencilKit 重畫清楚
 	@objc private func pinch(_ gesture: UIPinchGestureRecognizer) {
+		let factor = min(max(zoom * gesture.scale, 1), 3) / zoom
 		switch gesture.state {
 		case .began:
-			pinchBase = zoom
+			pinchFocus = gesture.location(in: content)
+			pinchOnScreen = CGPoint(x: pinchFocus.x - contentOffset.x, y: pinchFocus.y - contentOffset.y)
 		case .changed:
-			let focus = gesture.location(in: self)
-			let onScreen = CGPoint(x: focus.x - contentOffset.x, y: focus.y - contentOffset.y)
-			let old = zoom
-			zoom = min(max(pinchBase * gesture.scale, 1), 3)
-			guard zoom != old else { return }
-			let ratio = zoom / old
+			// 以 content 中心為原點的縮放，平移補回讓焦點不動
+			let center = CGPoint(x: content.bounds.midX, y: content.bounds.midY)
+			content.transform = CGAffineTransform(
+				translationX: (1 - factor) * (pinchFocus.x - center.x), y: (1 - factor) * (pinchFocus.y - center.y)
+			).scaledBy(x: factor, y: factor)
+		default:
+			content.transform = .identity
+			guard factor != 1 else { return }
+			zoom *= factor
 			relayout()
 			let maxX = max(0, contentSize.width - bounds.width)
 			let maxY = max(0, contentSize.height - bounds.height)
 			contentOffset = CGPoint(
-				x: min(max(0, focus.x * ratio - onScreen.x), maxX),
-				y: min(max(0, focus.y * ratio - onScreen.y), maxY))
-		default:
-			break
+				x: min(max(0, pinchFocus.x * factor - pinchOnScreen.x), maxX),
+				y: min(max(0, pinchFocus.y * factor - pinchOnScreen.y), maxY))
 		}
 	}
 
@@ -310,7 +325,8 @@ private final class PageSlot: UIView {
 /// PageStackView 包成 SwiftUI
 struct PageStack: UIViewRepresentable {
 	let pages: [CanvasPage]
-	@ObservedObject var store: CanvasStore
+	/// 頁資料由上層（已經在看 CanvasStore）傳進來，這裡不用再觀察一次
+	let store: CanvasStore
 	/// 圈選中整疊不收觸控，筆畫才不會跟拉框打架
 	var interactive: Bool
 	var penOn: Bool
@@ -318,6 +334,8 @@ struct PageStack: UIViewRepresentable {
 	var settings: CanvasToolSettings
 	var openCardID: UUID?
 	let handle: CanvasHandle
+	/// 一打開要捲到第幾頁（之後的捲動由 handle 叫）
+	var initialPage = 0
 	var onCurrentPage: (Int) -> Void
 	var onOpenBlock: (UUID) -> Void
 
@@ -325,6 +343,7 @@ struct PageStack: UIViewRepresentable {
 		let view = PageStackView(store: store)
 		handle.stack = view
 		view.onUse = { [handle] in handle.view = $0 }
+		view.scroll(toPage: initialPage)
 		return view
 	}
 

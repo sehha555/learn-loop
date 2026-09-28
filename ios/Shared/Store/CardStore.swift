@@ -121,16 +121,11 @@ final class CardStore: ObservableObject {
 		set {
 			objectWillChange.send()
 			defaults.set(newValue?.rawValue, forKey: "handedness")
-			// 改了慣用手，側欄重新跟著它放（之前手動換過邊的作廢）
-			defaults.removeObject(forKey: "canvasPanelOnLeft")
 		}
 	}
 
-	/// 畫布：樹欄在紙的哪一邊。沒手動換過就放在慣用手的反邊（右撇子放左邊），寫字時手不會蓋住
-	var canvasPanelOnLeft: Bool {
-		get { defaults.object(forKey: "canvasPanelOnLeft") as? Bool ?? (handedness == .right) }
-		set { defaults.set(newValue, forKey: "canvasPanelOnLeft") }
-	}
+	/// 畫布：樹欄放在慣用手的反邊（右撇子放左邊），寫字時手不會蓋住。畫布上臨時換邊不存
+	var canvasPanelOnLeft: Bool { handedness == .right }
 
 	/// 畫布分頁：筆開著（出筆工具列、Pencil 畫線）還是關著（只看、手指捲）。沒設過＝開
 	var canvasPenOn: Bool {

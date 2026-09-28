@@ -70,7 +70,7 @@ struct SettingsView: View {
 						store.relayAddress = relayAddress
 						store.relayToken = relayToken.trimmingCharacters(in: .whitespacesAndNewlines)
 						store.teachingStyle = style
-						if hand != store.handedness { store.handedness = hand }
+						store.handedness = hand
 						dismiss()
 					}
 				}

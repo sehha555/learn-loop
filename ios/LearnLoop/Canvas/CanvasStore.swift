@@ -16,12 +16,16 @@ final class CanvasStore: ObservableObject {
 	private var pendingSaves: [UUID: Task<Void, Never>] = [:]
 	/// 還沒寫下去的筆跡：app 進背景時要立刻補寫，不然這半秒內被砍就丟筆畫
 	private var pendingData: [UUID: Data] = [:]
-	/// 底圖渲染很貴（PDF 一頁畫成 2388px 寬），翻回來不重畫；有上限，捲過很多頁時舊的會被清
+	/// 底圖渲染很貴（PDF 一頁畫成 2388px 寬），翻回來不重畫；照佔的記憶體算上限，捲過很多頁時舊的會被清
 	private let backgroundCache: NSCache<NSString, UIImage> = {
 		let cache = NSCache<NSString, UIImage>()
-		cache.countLimit = 12
+		cache.totalCostLimit = 150 * 1024 * 1024
 		return cache
 	}()
+	/// 封面、頁面總覽的小圖。那一頁的筆跡改了就丟掉重畫
+	private let thumbnailCache = NSCache<NSUUID, UIImage>()
+	/// 開過的 PDF 留著：每畫一頁都重開整份檔很慢
+	private var pdfs: [UUID: PDFDocument] = [:]
 
 	init(dataDir: URL) {
 		dir = dataDir.appendingPathComponent("canvas", isDirectory: true)
@@ -44,14 +48,24 @@ final class CanvasStore: ObservableObject {
 	/// 舊頁沒有固定大小，寬用舊底圖的 1194、高要蓋得住底圖和寫過的筆跡。index.json 改名留著，不刪
 	private func migrateLegacyIndex() {
 		let indexURL = dir.appendingPathComponent("index.json")
+		/// 舊格式的頁：沒有大小、沒有橫線設定
+		struct LegacyPage: Decodable {
+			let id: UUID
+			let createdAt: Date
+			let blocks: [CanvasBlock]
+			let background: CanvasBackground?
+		}
 		guard let data = try? Data(contentsOf: indexURL),
-			var pages = try? JSONDecoder().decode([CanvasPage].self, from: data), !pages.isEmpty
+			let legacy = try? JSONDecoder().decode([LegacyPage].self, from: data), !legacy.isEmpty
 		else { return }
 		let width = Self.backgroundWidth
-		for index in pages.indices {
-			let ink = drawing(for: pages[index].id).bounds
-			let paper = backgroundImage(for: pages[index]).map { CanvasPage.backgroundRect(for: $0, pageWidth: width).height } ?? width * 1.414
-			pages[index].size = CGSize(width: width, height: max(ink.isNull ? 0 : ink.maxY + 200, paper))
+		let pages = legacy.map { old in
+			let ink = drawing(for: old.id).bounds
+			let paper = old.background.flatMap(backgroundImage).map { CanvasPage.backgroundRect(for: $0, pageWidth: width).height }
+				?? width * 1.414
+			return CanvasPage(
+				id: old.id, createdAt: old.createdAt, blocks: old.blocks, background: old.background,
+				size: CGSize(width: width, height: max(ink.isNull ? 0 : ink.maxY + 200, paper)))
 		}
 		library.materials = [Material(name: "舊畫布", folderID: nil, pages: pages)]
 		saveLibrary()
@@ -139,30 +153,35 @@ final class CanvasStore: ObservableObject {
 	/// 在某頁後面插一頁，大小跟那一頁一樣；回傳新頁的索引
 	@discardableResult
 	func addPage(to materialID: UUID, after index: Int, ruled: Bool = true) -> Int {
-		guard let m = materialIndex(materialID) else { return index }
-		let pages = library.materials[m].pages
-		let at = min(index + 1, pages.count)
+		let pages = material(materialID)?.pages ?? []
 		let size = pages.indices.contains(index) ? pages[index].size : CanvasPage.blankSize
-		library.materials[m].pages.insert(CanvasPage(size: size, ruled: ruled), at: at)
-		saveLibrary()
-		return at
+		return insert([CanvasPage(size: size, ruled: ruled)], into: materialID, after: index)
 	}
 
 	/// 把 PDF 或圖片的頁插進這份材料的某頁後面，回傳第一張新頁的索引
 	func insertFile(from source: URL, into materialID: UUID, after index: Int) throws -> Int {
+		insert(try copyAsPages(source), into: materialID, after: index)
+	}
+
+	private func insert(_ newPages: [CanvasPage], into materialID: UUID, after index: Int) -> Int {
 		guard let m = materialIndex(materialID) else { return index }
-		let newPages = try copyAsPages(source)
 		let at = min(index + 1, library.materials[m].pages.count)
 		library.materials[m].pages.insert(contentsOf: newPages, at: at)
 		saveLibrary()
 		return at
 	}
 
+	/// 這一頁在第幾份材料的第幾頁
+	private func locate(_ pageID: UUID, in materialID: UUID) -> (m: Int, p: Int)? {
+		guard let m = materialIndex(materialID),
+			let p = library.materials[m].pages.firstIndex(where: { $0.id == pageID })
+		else { return nil }
+		return (m, p)
+	}
+
 	/// 刪一頁（連筆跡檔）。每份材料至少留一頁
 	func deletePage(_ pageID: UUID, from materialID: UUID) {
-		guard let m = materialIndex(materialID), library.materials[m].pages.count > 1,
-			let p = library.materials[m].pages.firstIndex(where: { $0.id == pageID })
-		else { return }
+		guard let (m, p) = locate(pageID, in: materialID), library.materials[m].pages.count > 1 else { return }
 		let removed = library.materials[m].pages.remove(at: p)
 		removeDrawing(removed)
 		removeUnusedFiles(removed.background.map { [$0] } ?? [])
@@ -172,9 +191,7 @@ final class CanvasStore: ObservableObject {
 	/// 複製一頁插在它後面：底、大小、筆跡都一樣，圈選過的塊不帶（那是對到原頁的題）
 	@discardableResult
 	func duplicatePage(_ pageID: UUID, in materialID: UUID) -> Int? {
-		guard let m = materialIndex(materialID),
-			let p = library.materials[m].pages.firstIndex(where: { $0.id == pageID })
-		else { return nil }
+		guard let (m, p) = locate(pageID, in: materialID) else { return nil }
 		let source = library.materials[m].pages[p]
 		let copy = CanvasPage(background: source.background, size: source.size, ruled: source.ruled)
 		let ink = drawing(for: pageID).dataRepresentation()
@@ -205,6 +222,7 @@ final class CanvasStore: ObservableObject {
 	}
 
 	func saveDrawing(_ drawing: PKDrawing, for pageID: UUID) {
+		thumbnailCache.removeObject(forKey: pageID as NSUUID)
 		pendingSaves[pageID]?.cancel()
 		pendingData[pageID] = drawing.dataRepresentation()
 		pendingSaves[pageID] = Task {
@@ -245,16 +263,6 @@ final class CanvasStore: ObservableObject {
 		}
 	}
 
-	/// blockID → 哪一頁的哪一塊
-	func block(_ id: UUID) -> (page: CanvasPage, block: CanvasBlock)? {
-		for material in library.materials {
-			for page in material.pages {
-				if let block = page.blocks.first(where: { $0.id == id }) { return (page, block) }
-			}
-		}
-		return nil
-	}
-
 	// MARK: - 匯入的原檔與底圖
 
 	/// 底圖固定用 iPad 橫向最寬的 1194pt 畫、@2x 像素；顯示時縮到頁的大小
@@ -275,6 +283,7 @@ final class CanvasStore: ObservableObject {
 		let sizes: [CGSize]
 		if ext == "pdf" {
 			guard let pdf = PDFDocument(url: target) else { throw CocoaError(.fileReadCorruptFile) }
+			pdfs[fileID] = pdf
 			sizes = (0..<pdf.pageCount).compactMap { pdf.page(at: $0)?.bounds(for: .mediaBox).size }
 		} else {
 			sizes = UIImage(contentsOfFile: target.path).map { [$0.size] } ?? []
@@ -295,25 +304,31 @@ final class CanvasStore: ObservableObject {
 	private func removeUnusedFiles(_ candidates: Set<CanvasBackground>) {
 		let inUse = Set(library.materials.flatMap(\.pages).compactMap { $0.background?.fileID })
 		for background in candidates where !inUse.contains(background.fileID) {
+			pdfs[background.fileID] = nil
 			try? FileManager.default.removeItem(at: fileURL(background))
 		}
 	}
 
-	/// 封面、頁面總覽用的小圖：白底＋底圖＋筆跡，寬 width pt
-	func thumbnail(for page: CanvasPage, width: CGFloat) -> UIImage {
-		let scale = width / max(page.size.width, 1)
-		let size = CGSize(width: width, height: page.size.height * scale)
-		let ink = drawing(for: page.id).image(from: CGRect(origin: .zero, size: page.size), scale: scale * UIScreen.main.scale)
+	private func pdfPage(_ background: CanvasBackground) -> PDFPage? {
+		if pdfs[background.fileID] == nil { pdfs[background.fileID] = PDFDocument(url: fileURL(background)) }
+		return pdfs[background.fileID]?.page(at: background.pageIndex)
+	}
+
+	/// 一頁（或頁上的一塊）畫成圖：白底＋底圖（或淡橫線）＋筆跡。
+	/// 封面、頁面總覽、圈一題送去問的圖都用這個，三邊看到的紙長一樣
+	func render(_ page: CanvasPage, drawing: PKDrawing, rect: CGRect, scale: CGFloat, background: UIImage?) -> UIImage {
+		let size = CGSize(width: rect.width * scale, height: rect.height * scale)
+		let ink = drawing.image(from: rect, scale: scale * UIScreen.main.scale)
 		return UIGraphicsImageRenderer(size: size).image { context in
 			UIColor.white.setFill()
 			context.fill(CGRect(origin: .zero, size: size))
-			if let background = backgroundImage(for: page) {
-				background.draw(in: CanvasPage.backgroundRect(for: background, pageWidth: size.width))
+			let origin = CGPoint(x: -rect.minX * scale, y: -rect.minY * scale)
+			if let background {
+				background.draw(in: CanvasPage.backgroundRect(for: background, pageWidth: page.size.width * scale).offsetBy(dx: origin.x, dy: origin.y))
 			} else if page.ruled {
-				// 橫線頁跟空白頁在總覽裡要分得出來
 				UIColor.systemGray5.setFill()
 				let spacing = CanvasPage.lineSpacing * scale
-				for y in stride(from: spacing, to: size.height, by: spacing) {
+				for y in stride(from: origin.y + spacing, to: size.height, by: spacing) where y > 0 {
 					context.fill(CGRect(x: 0, y: y, width: size.width, height: 1))
 				}
 			}
@@ -321,23 +336,43 @@ final class CanvasStore: ObservableObject {
 		}
 	}
 
+	static let thumbnailWidth: CGFloat = 150
+
+	/// 封面、頁面總覽用的小圖。底圖直接從 PDF 畫小張，不經過畫布用的大圖快取
+	func thumbnail(for page: CanvasPage) -> UIImage {
+		if let cached = thumbnailCache.object(forKey: page.id as NSUUID) { return cached }
+		let scale = Self.thumbnailWidth / max(page.size.width, 1)
+		let background: UIImage? = page.background.flatMap { background in
+			guard background.ext == "pdf" else { return backgroundImage(for: page) }
+			guard let pdfPage = pdfPage(background) else { return nil }
+			let bounds = pdfPage.bounds(for: .mediaBox)
+			let width = Self.thumbnailWidth * UIScreen.main.scale
+			return pdfPage.thumbnail(of: CGSize(width: width, height: width * bounds.height / max(bounds.width, 1)), for: .mediaBox)
+		}
+		let image = render(page, drawing: drawing(for: page.id), rect: CGRect(origin: .zero, size: page.size), scale: scale, background: background)
+		thumbnailCache.setObject(image, forKey: page.id as NSUUID)
+		return image
+	}
+
 	/// 這一頁的底圖（沒匯入就 nil）
 	func backgroundImage(for page: CanvasPage) -> UIImage? {
-		guard let background = page.background else { return nil }
+		page.background.flatMap(backgroundImage)
+	}
+
+	private func backgroundImage(_ background: CanvasBackground) -> UIImage? {
 		let key = "\(background.fileID.uuidString)-\(background.pageIndex)" as NSString
 		if let cached = backgroundCache.object(forKey: key) { return cached }
-		let url = fileURL(background)
 		let image: UIImage?
 		if background.ext == "pdf" {
-			guard let pdfPage = PDFDocument(url: url)?.page(at: background.pageIndex) else { return nil }
+			guard let pdfPage = pdfPage(background) else { return nil }
 			let bounds = pdfPage.bounds(for: .mediaBox)
 			let width = Self.backgroundWidth * 2
-			let size = CGSize(width: width, height: width * bounds.height / max(bounds.width, 1))
-			image = pdfPage.thumbnail(of: size, for: .mediaBox)
+			image = pdfPage.thumbnail(of: CGSize(width: width, height: width * bounds.height / max(bounds.width, 1)), for: .mediaBox)
 		} else {
-			image = UIImage(contentsOfFile: url.path)
+			image = UIImage(contentsOfFile: fileURL(background).path)
 		}
-		if let image { backgroundCache.setObject(image, forKey: key) }
+		guard let image, let cg = image.cgImage else { return image }
+		backgroundCache.setObject(image, forKey: key, cost: cg.bytesPerRow * cg.height)
 		return image
 	}
 }

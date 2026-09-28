@@ -16,7 +16,7 @@ struct OnboardingView: View {
 					.multilineTextAlignment(.center)
 			}
 			HStack(spacing: 24) {
-				ForEach([Handedness.left, .right], id: \.self) { hand in
+				ForEach(Handedness.allCases, id: \.self) { hand in
 					Button {
 						store.handedness = hand
 					} label: {

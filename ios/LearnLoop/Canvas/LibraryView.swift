@@ -46,7 +46,7 @@ struct LibraryView: View {
 		// 材料全螢幕打開（照 GoodNotes）：紙要整個畫面，左上「書架」回來
 		.fullScreenCover(item: $opened, onDismiss: { materialPath = NavigationPath() }) { route in
 			NavigationStack(path: $materialPath) {
-				MaterialView(store: store, canvas: canvas, materialID: route.id, path: $materialPath)
+				MaterialView(store: store, canvas: canvas, materialID: route.id)
 					.toolbar {
 						ToolbarItem(placement: .topBarLeading) {
 							Button("書架", systemImage: "chevron.left") {
@@ -64,8 +64,6 @@ struct LibraryView: View {
 			importIncoming()
 		}
 		.onChange(of: incomingPDF) { importIncoming() }
-		// 慣用手問卷還開著時不能再蓋一層，答完才打開上次那份
-		.onChange(of: store.handedness) { restore() }
 		.onChange(of: scenePhase) { _, phase in
 			if phase != .active { canvas.flushSaves() }
 		}
@@ -109,7 +107,7 @@ struct LibraryView: View {
 
 	/// 上次停在哪一頁（canvasPageID）→ 那份材料在哪個資料夾，打開它
 	private func restore() {
-		guard !restored, store.handedness != nil else { return }
+		guard !restored else { return }
 		restored = true
 		guard let pageID = UUID(uuidString: store.canvasPageID), let material = canvas.material(containing: pageID) else { return }
 		selection = material.folderID ?? Self.shelfID
@@ -203,7 +201,7 @@ struct LibraryView: View {
 	private func cover(_ material: Material) -> some View {
 		Group {
 			if let first = material.pages.first {
-				Image(uiImage: canvas.thumbnail(for: first, width: 150))
+				Image(uiImage: canvas.thumbnail(for: first))
 					.resizable()
 					.scaledToFit()
 			} else {
@@ -222,13 +220,13 @@ struct LibraryView: View {
 
 	// MARK: - 新增、改名、刪除
 
-	private enum Item: Equatable {
+	private enum Item {
 		case folder(UUID)
 		case material(UUID)
 	}
 
 	private struct Naming {
-		enum Kind: Equatable {
+		enum Kind {
 			case newFolder, newNotebook
 			case rename(Item)
 		}

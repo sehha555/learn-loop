@@ -132,36 +132,42 @@ enum ShapeKind: CaseIterable {
 
 /// 紙的白底＋淡橫線：跟內容一起捲，看得出寫到哪一行。墊講義的頁只留白底不畫線
 private final class RuledLinesView: UIView {
+	override class var layerClass: AnyClass { CAShapeLayer.self }
+	private var lines: CAShapeLayer { layer as! CAShapeLayer }
+
 	var showsLines = true {
-		didSet { setNeedsDisplay() }
+		didSet { setNeedsLayout() }
 	}
 	/// 頁縮放多少倍，線距跟著縮放
 	var scale: CGFloat = 1 {
-		didSet { if scale != oldValue { setNeedsDisplay() } }
+		didSet { if scale != oldValue { setNeedsLayout() } }
 	}
 
 	override init(frame: CGRect) {
 		super.init(frame: frame)
-		backgroundColor = .white
-		contentMode = .redraw
+		// 線用向量畫：頁放大很多倍時，自己畫的點陣圖一頁就要幾百 MB
 		isUserInteractionEnabled = false
+		lines.fillColor = nil
+		lines.lineWidth = 1
+		lines.actions = ["path": NSNull()]
 	}
 
 	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-	override func draw(_ rect: CGRect) {
-		guard showsLines else { return }
-		UIColor.systemGray5.setStroke()
-		let path = UIBezierPath()
-		let spacing = CanvasPage.lineSpacing * scale
-		var y = (rect.minY / spacing).rounded(.down) * spacing + spacing
-		while y <= rect.maxY {
-			path.move(to: CGPoint(x: rect.minX, y: y))
-			path.addLine(to: CGPoint(x: rect.maxX, y: y))
-			y += spacing
+	override func layoutSubviews() {
+		super.layoutSubviews()
+		lines.strokeColor = UIColor.systemGray5.cgColor
+		guard showsLines else {
+			lines.path = nil
+			return
 		}
-		path.lineWidth = 1
-		path.stroke()
+		let path = CGMutablePath()
+		let spacing = CanvasPage.lineSpacing * scale
+		for y in stride(from: spacing, to: bounds.height, by: spacing) {
+			path.move(to: CGPoint(x: 0, y: y))
+			path.addLine(to: CGPoint(x: bounds.width, y: y))
+		}
+		lines.path = path
 	}
 }
 

@@ -56,10 +56,10 @@ final class CanvasStoreTests: XCTestCase {
 		let cardID = UUID()
 		let block = CanvasBlock(rect: CGRect(x: 10, y: 20, width: 300, height: 120), cardID: cardID)
 		store.addBlock(block, to: pageID)
-		let hit = CanvasStore(dataDir: dir).block(block.id)
-		XCTAssertEqual(hit?.page.id, pageID)
-		XCTAssertEqual(hit?.block.rect, CGRect(x: 10, y: 20, width: 300, height: 120))
-		XCTAssertEqual(hit?.block.cardID, cardID)
+		let saved = CanvasStore(dataDir: dir).material(containing: pageID)?.pages.first?.blocks.first
+		XCTAssertEqual(saved?.id, block.id)
+		XCTAssertEqual(saved?.rect, CGRect(x: 10, y: 20, width: 300, height: 120))
+		XCTAssertEqual(saved?.cardID, cardID)
 	}
 
 	/// 停筆後的半秒內 app 進背景：flushSaves 要馬上落地，不等計時器

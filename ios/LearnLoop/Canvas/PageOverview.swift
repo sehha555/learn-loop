@@ -35,7 +35,7 @@ struct PageOverview: View {
 			dismiss()
 		} label: {
 			VStack(spacing: 6) {
-				Image(uiImage: canvas.thumbnail(for: page, width: 150))
+				Image(uiImage: canvas.thumbnail(for: page))
 					.resizable()
 					.scaledToFit()
 					.frame(height: 190)

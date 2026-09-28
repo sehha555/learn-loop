@@ -10,8 +10,6 @@ struct MaterialView: View {
 	@ObservedObject var store: CardStore
 	@ObservedObject var canvas: CanvasStore
 	let materialID: UUID
-	/// 書架那層的導覽路徑：概念 chip 的跳轉也推在這上面
-	@Binding var path: NavigationPath
 	@State private var pageIndex = 0
 	@State private var penOn: Bool
 	@State private var tool: CanvasTool = .pen(0)
@@ -25,8 +23,6 @@ struct MaterialView: View {
 	@State private var shapeMenu = false
 	@State private var importing = false
 	@State private var overview = false
-	/// 上次停的頁只在第一次出現時拉回來
-	@State private var restoredPage = false
 	/// 放 @State：書架那層重畫時這個 struct 會重建，handle 不能跟著換新（換了就連不到活的畫布）
 	@State private var handle = CanvasHandle()
 
@@ -47,11 +43,13 @@ struct MaterialView: View {
 	private static let defaultPanelWidth: CGFloat = 440
 	private static let panelRange: ClosedRange<CGFloat> = 320...640
 
-	init(store: CardStore, canvas: CanvasStore, materialID: UUID, path: Binding<NavigationPath>) {
+	init(store: CardStore, canvas: CanvasStore, materialID: UUID) {
 		self.store = store
 		self.canvas = canvas
 		self.materialID = materialID
-		_path = path
+		// 上次停在這份材料的哪一頁，一打開就捲到那裡
+		let lastPage = canvas.material(materialID)?.pages.firstIndex { $0.id.uuidString == store.canvasPageID }
+		_pageIndex = State(initialValue: lastPage ?? 0)
 		_penOn = State(initialValue: store.canvasPenOn)
 		var tools = CanvasToolSettings()
 		if store.canvasPenWidth > 0 { tools.penWidth = CGFloat(store.canvasPenWidth) }
@@ -89,18 +87,8 @@ struct MaterialView: View {
 				handle.stack?.scroll(toPage: index)
 			}
 		}
-		.onAppear {
-			guard !restoredPage else { return }
-			restoredPage = true
-			if let index = pages.firstIndex(where: { $0.id.uuidString == store.canvasPageID }) {
-				pageIndex = index
-				handle.stack?.scroll(toPage: index)
-			} else if let first = pages.first {
-				// 換了一份材料：沒捲動的話 pageIndex 不會變，先記下第一頁，下次才打開這份
-				store.canvasPageID = first.id.uuidString
-			}
-		}
-		.onChange(of: pageIndex) {
+		// initial：一打開就記下，沒捲動也知道下次要開這份
+		.onChange(of: pageIndex, initial: true) {
 			if pages.indices.contains(pageIndex) { store.canvasPageID = pages[pageIndex].id.uuidString }
 		}
 		.onDisappear { canvas.flushSaves() }
@@ -120,8 +108,8 @@ struct MaterialView: View {
 	private var paper: some View {
 		PageStack(
 			pages: pages, store: canvas, interactive: !selecting, penOn: penOn, tool: tool, settings: settings,
-			openCardID: openTopicID, handle: handle,
-			onCurrentPage: { pageIndex = $0 }, onOpenBlock: open)
+			openCardID: openTopicID, handle: handle, initialPage: pageIndex,
+			onCurrentPage: { pageIndex = $0 }, onOpenBlock: { openTopicID = $0 })
 			.overlay { if selecting { selectionLayer } }
 			// 紙頂一條細工具列：頂端那排跟 iPad 的分頁列同一排，放不下
 			.overlay(alignment: .top) { penBar.padding(.top, 2).padding(.horizontal, 12) }
@@ -422,15 +410,7 @@ struct MaterialView: View {
 		let rect = hit.rect
 		// PKDrawing 出來是透明背景，直接轉 JPEG 會變黑底；有講義底圖的話題目印在底圖上，
 		// 他的過程寫在旁邊，兩個都要給模型看 —— 白底、底圖、筆跡三層疊起來再裁
-		let ink = hit.drawing.image(from: rect, scale: 2)
-		let image = UIGraphicsImageRenderer(size: rect.size).image { context in
-			UIColor.white.setFill()
-			context.fill(CGRect(origin: .zero, size: rect.size))
-			if let background = hit.background {
-				background.draw(in: CanvasPage.backgroundRect(for: background, pageWidth: hit.page.size.width).offsetBy(dx: -rect.minX, dy: -rect.minY))
-			}
-			ink.draw(in: CGRect(origin: .zero, size: rect.size))
-		}
+		let image = canvas.render(hit.page, drawing: hit.drawing, rect: rect, scale: 1, background: hit.background)
 		let blockID = UUID()
 		let pageID = hit.page.id
 		asking = Task { @MainActor in
@@ -440,16 +420,12 @@ struct MaterialView: View {
 				canvas.addBlock(CanvasBlock(id: blockID, rect: rect, cardID: id), to: pageID)
 				selecting = false
 				self.selection = nil
-				open(id)
+				openTopicID = id
 			} catch {
 				guard !AIClient.isCancellation(error) else { return }
 				errorText = error.localizedDescription
 			}
 		}
-	}
-
-	private func open(_ id: UUID) {
-		openTopicID = id
 	}
 
 	// MARK: - 樹欄
@@ -466,7 +442,6 @@ struct MaterialView: View {
 				Spacer()
 				Button(panelOnLeft ? "換到右邊" : "換到左邊", systemImage: "arrow.left.arrow.right") {
 					panelOnLeft.toggle()
-					store.canvasPanelOnLeft = panelOnLeft
 				}
 				// 字跟「換到左右邊」一樣大：只放 X 太小，看不出能收
 				Button("收起", systemImage: "xmark") { openTopicID = nil }
