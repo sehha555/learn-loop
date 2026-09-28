@@ -126,6 +126,12 @@ final class CardStore: ObservableObject {
 		set { defaults.set(newValue, forKey: "canvasPenOn") }
 	}
 
+	/// 畫布分頁：筆的粗細（pt）。0 = 沒設過，用預設
+	var canvasPenWidth: Double {
+		get { defaults.double(forKey: "canvasPenWidth") }
+		set { defaults.set(newValue, forKey: "canvasPenWidth") }
+	}
+
 	/// 畫布分頁：上次停在哪一頁（存頁的 id，插頁之後索引會變）
 	var canvasPageID: String {
 		get { defaults.string(forKey: "canvasPageID") ?? "" }

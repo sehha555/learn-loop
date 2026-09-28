@@ -12,6 +12,9 @@ struct CanvasTabView: View {
 	@State private var pageIndex = 0
 	@State private var penOn: Bool
 	@State private var tool: CanvasTool = .pen(0)
+	@State private var settings = CanvasToolSettings()
+	/// 再點一次已選中的筆：開粗細選單（值是哪一色的筆，popover 要掛在那顆上）
+	@State private var penMenu: Int?
 	@State private var importing = false
 	/// 上次停的頁只在第一次出現時拉回來，之後切分頁回來維持當下
 	@State private var restoredPage = false
@@ -42,6 +45,9 @@ struct CanvasTabView: View {
 		self.store = store
 		_canvas = StateObject(wrappedValue: CanvasStore(dataDir: store.dataDir))
 		_penOn = State(initialValue: store.canvasPenOn)
+		if store.canvasPenWidth > 0 {
+			_settings = State(initialValue: CanvasToolSettings(penWidth: CGFloat(store.canvasPenWidth)))
+		}
 		_panelOnLeft = State(initialValue: store.canvasPanelOnLeft)
 		let saved = store.canvasPanelWidth
 		_panelWidth = State(initialValue: saved > 0 ? CGFloat(saved) : Self.defaultPanelWidth)
@@ -95,7 +101,7 @@ struct CanvasTabView: View {
 
 	private var paper: some View {
 		PencilCanvas(
-			pageID: page.id, store: canvas, interactive: !selecting, penOn: penOn, tool: tool,
+			pageID: page.id, store: canvas, interactive: !selecting, penOn: penOn, tool: tool, settings: settings,
 			background: canvas.backgroundImage(for: page), handle: handle,
 			onScroll: { scrollOffset = $0 })
 			.overlay { blockMarks }
@@ -160,8 +166,15 @@ struct CanvasTabView: View {
 			if penOn {
 				barDivider
 				ForEach(CanvasTool.penColors.indices, id: \.self) { index in
+					// 點大小跟著粗細：下筆前就看得出多粗、什麼色。已選中再點一次開粗細選單
 					barButton("筆", systemImage: "pencil.tip", selected: tool == .pen(index),
-						dot: Color(CanvasTool.penColors[index])) { tool = .pen(index) }
+						dot: Color(CanvasTool.penColors[index]), dotSize: dotSize(settings.penWidth)) {
+						if tool == .pen(index) { penMenu = index } else { tool = .pen(index) }
+					}
+					.popover(isPresented: Binding(
+						get: { penMenu == index }, set: { if !$0 { penMenu = nil } })) {
+						penWidthMenu(color: Color(CanvasTool.penColors[index]))
+					}
 				}
 				barButton("螢光筆", systemImage: "highlighter", selected: tool == .marker, dot: .yellow) {
 					tool = .marker
@@ -179,9 +192,34 @@ struct CanvasTabView: View {
 		}
 	}
 
-	/// 工具列上一顆圖示鈕：選中的墊灰底，筆類底下一個顏色點
+	/// 粗細換成工具列上的點大小（1pt → 約 4、12pt → 約 10）
+	private func dotSize(_ width: CGFloat) -> CGFloat {
+		3.5 + width * 0.55
+	}
+
+	/// 筆的粗細：拖滑桿調 pt，上面一段線即時畫成現在的粗細與顏色
+	private func penWidthMenu(color: Color) -> some View {
+		VStack(spacing: 12) {
+			Capsule().fill(color).frame(width: 150, height: settings.penWidth)
+				.frame(height: CanvasToolSettings.penWidthRange.upperBound)
+			HStack(spacing: 10) {
+				Slider(value: $settings.penWidth, in: CanvasToolSettings.penWidthRange, step: 0.5) { editing in
+					if !editing { store.canvasPenWidth = Double(settings.penWidth) }
+				}
+				Text(String(format: "%.1f pt", settings.penWidth))
+					.font(.caption.monospacedDigit())
+					.foregroundStyle(.secondary)
+					.frame(width: 46, alignment: .trailing)
+			}
+		}
+		.padding(16)
+		.frame(width: 260)
+		.presentationCompactAdaptation(.popover)
+	}
+
+	/// 工具列上一顆圖示鈕：選中的墊灰底，筆類底下一個顏色點（筆的點大小跟著粗細）
 	private func barButton(
-		_ title: String, systemImage: String, selected: Bool, dot: Color? = nil,
+		_ title: String, systemImage: String, selected: Bool, dot: Color? = nil, dotSize: CGFloat = 6,
 		action: @escaping () -> Void
 	) -> some View {
 		Button(action: action) {
@@ -190,7 +228,7 @@ struct CanvasTabView: View {
 				.frame(width: 34, height: 30)
 				.overlay(alignment: .bottomTrailing) {
 					if let dot {
-						Circle().fill(dot).frame(width: 6, height: 6).offset(x: -5, y: -1)
+						Circle().fill(dot).frame(width: dotSize, height: dotSize).offset(x: -5, y: -1)
 					}
 				}
 				.background(selected ? Color(.systemGray5) : .clear, in: RoundedRectangle(cornerRadius: 8))

@@ -16,14 +16,21 @@ enum CanvasTool: Equatable {
 
 	static let penColors: [UIColor] = [.black, .systemRed, .systemBlue]
 
-	var pkTool: PKTool {
+	func pkTool(_ settings: CanvasToolSettings) -> PKTool {
 		switch self {
-		case .pen(let index): PKInkingTool(.pen, color: Self.penColors[index], width: 3)
+		case .pen(let index): PKInkingTool(.pen, color: Self.penColors[index], width: settings.penWidth)
 		case .marker: PKInkingTool(.marker, color: .systemYellow, width: 18)
 		case .eraser: PKEraserTool(.vector)
 		case .lasso: PKLassoTool()
 		}
 	}
+}
+
+/// 工具的粗細等設定，三色筆共用一個粗細。存偏好，換工具不會重設
+struct CanvasToolSettings: Equatable {
+	static let penWidthRange: ClosedRange<CGFloat> = 1...12
+
+	var penWidth: CGFloat = 3.5
 }
 
 /// 紙的白底＋淡橫線：跟內容一起捲，看得出寫到哪一行。墊講義的頁只留白底不畫線
@@ -113,6 +120,7 @@ struct PencilCanvas: UIViewRepresentable {
 	/// 筆開著才畫得出線；關著時手指捲紙看內容
 	var penOn: Bool
 	var tool: CanvasTool
+	var settings: CanvasToolSettings
 	var background: UIImage?
 	/// 讓 SwiftUI 那邊拿得到活的 canvas（圈選時要當下的筆跡與捲動位置，不能等存檔）
 	let handle: CanvasHandle
@@ -131,9 +139,10 @@ struct PencilCanvas: UIViewRepresentable {
 		#endif
 		view.delegate = context.coordinator
 		view.drawing = store.drawing(for: pageID)
-		view.tool = tool.pkTool
+		view.tool = tool.pkTool(settings)
 		context.coordinator.pageID = pageID
 		context.coordinator.tool = tool
+		context.coordinator.settings = settings
 		return view
 	}
 
@@ -144,9 +153,10 @@ struct PencilCanvas: UIViewRepresentable {
 			view.contentOffset = .zero
 		}
 		if view.background !== background { view.background = background }
-		if context.coordinator.tool != tool {
+		if context.coordinator.tool != tool || context.coordinator.settings != settings {
 			context.coordinator.tool = tool
-			view.tool = tool.pkTool
+			context.coordinator.settings = settings
+			view.tool = tool.pkTool(settings)
 		}
 		view.isUserInteractionEnabled = interactive
 		let writing = interactive && penOn
@@ -161,6 +171,7 @@ struct PencilCanvas: UIViewRepresentable {
 		let store: CanvasStore
 		var pageID: UUID?
 		var tool: CanvasTool?
+		var settings: CanvasToolSettings?
 		let onScroll: (CGPoint) -> Void
 
 		init(store: CanvasStore, onScroll: @escaping (CGPoint) -> Void) {
