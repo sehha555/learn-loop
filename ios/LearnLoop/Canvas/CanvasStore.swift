@@ -3,45 +3,190 @@ import PDFKit
 import PencilKit
 import UIKit
 
-/// 畫布的儲存：頁的索引（canvas/index.json）＋每頁的筆跡（canvas/<pageID>.drawing）。
-/// 只有主 app 用 —— 分享浮層不畫圖，所以不放 Shared/
+/// 畫布的儲存：書架（canvas/library.json：資料夾＋材料＋每份材料的頁）＋每頁的筆跡（canvas/<pageID>.drawing）
+/// ＋匯入的原檔（canvas/files/）。只有主 app 用 —— 分享浮層不畫圖，所以不放 Shared/
 @MainActor
 final class CanvasStore: ObservableObject {
-	@Published private(set) var pages: [CanvasPage] = []
+	@Published private(set) var library = Library()
 
 	private let dir: URL
-	private let indexURL: URL
+	private let libraryURL: URL
 	private let filesDir: URL
 	/// 筆跡存檔延後半秒：每一筆都寫檔太兇，停筆才寫
 	private var pendingSaves: [UUID: Task<Void, Never>] = [:]
 	/// 還沒寫下去的筆跡：app 進背景時要立刻補寫，不然這半秒內被砍就丟筆畫
 	private var pendingData: [UUID: Data] = [:]
-	/// 底圖渲染很貴（PDF 一頁畫成 2388px 寬），翻回來不重畫
-	private var backgroundCache: [String: UIImage] = [:]
+	/// 底圖渲染很貴（PDF 一頁畫成 2388px 寬），翻回來不重畫；有上限，捲過很多頁時舊的會被清
+	private let backgroundCache: NSCache<NSString, UIImage> = {
+		let cache = NSCache<NSString, UIImage>()
+		cache.countLimit = 12
+		return cache
+	}()
 
 	init(dataDir: URL) {
 		dir = dataDir.appendingPathComponent("canvas", isDirectory: true)
-		indexURL = dir.appendingPathComponent("index.json")
+		libraryURL = dir.appendingPathComponent("library.json")
 		filesDir = dir.appendingPathComponent("files", isDirectory: true)
 		try? FileManager.default.createDirectory(at: filesDir, withIntermediateDirectories: true)
-		load()
-		// 第一張白紙也要落地：不存的話重開就是另一張新的，寫過的筆跡檔變孤兒
-		if pages.isEmpty {
-			pages = [CanvasPage()]
-			savePages()
+		if let data = try? Data(contentsOf: libraryURL), let decoded = try? JSONDecoder().decode(Library.self, from: data) {
+			library = decoded
+		} else {
+			migrateLegacyIndex()
 		}
 	}
 
-	private func load() {
-		guard let data = try? Data(contentsOf: indexURL),
-			let decoded = try? JSONDecoder().decode([CanvasPage].self, from: data)
-		else { return }
-		pages = decoded
+	private func saveLibrary() {
+		guard let data = try? JSONEncoder().encode(library) else { return }
+		try? data.write(to: libraryURL, options: .atomic)
 	}
 
-	private func savePages() {
-		guard let data = try? JSONEncoder().encode(pages) else { return }
-		try? data.write(to: indexURL, options: .atomic)
+	/// 書架出現前只有一本全域筆記（canvas/index.json）：整本搬成書架最上層的「舊畫布」。
+	/// 舊頁沒有固定大小，寬用舊底圖的 1194、高要蓋得住寫過的筆跡。index.json 改名留著，不刪
+	private func migrateLegacyIndex() {
+		let indexURL = dir.appendingPathComponent("index.json")
+		guard let data = try? Data(contentsOf: indexURL),
+			var pages = try? JSONDecoder().decode([CanvasPage].self, from: data), !pages.isEmpty
+		else { return }
+		let width = Self.backgroundWidth
+		for index in pages.indices {
+			let ink = drawing(for: pages[index].id).bounds
+			pages[index].size = CGSize(width: width, height: max(ink.isNull ? 0 : ink.maxY + 200, width * 1.414))
+		}
+		library.materials = [Material(name: "舊畫布", folderID: nil, pages: pages)]
+		saveLibrary()
+		try? FileManager.default.moveItem(at: indexURL, to: dir.appendingPathComponent("index.migrated.json"))
+	}
+
+	// MARK: - 查
+
+	func material(_ id: UUID) -> Material? {
+		library.materials.first { $0.id == id }
+	}
+
+	/// 這一頁在哪份材料裡（記得停在哪一頁時，要從頁找回材料）
+	func material(containing pageID: UUID) -> Material? {
+		library.materials.first { $0.pages.contains { $0.id == pageID } }
+	}
+
+	private func materialIndex(_ id: UUID) -> Int? {
+		library.materials.firstIndex { $0.id == id }
+	}
+
+	// MARK: - 資料夾
+
+	@discardableResult
+	func createFolder(named name: String, in parentID: UUID?) -> Folder {
+		let folder = Folder(name: name, parentID: parentID)
+		library.folders.append(folder)
+		saveLibrary()
+		return folder
+	}
+
+	func renameFolder(_ id: UUID, to name: String) {
+		guard let index = library.folders.firstIndex(where: { $0.id == id }) else { return }
+		library.folders[index].name = name
+		saveLibrary()
+	}
+
+	/// 資料夾連同底下每一層的資料夾與材料一起刪（材料的筆跡、原檔也刪）
+	func deleteFolder(_ id: UUID) {
+		let tree = library.folderTree(id)
+		for material in library.materials where material.folderID.map(tree.contains) == true {
+			deleteMaterial(material.id)
+		}
+		library.folders.removeAll { tree.contains($0.id) }
+		saveLibrary()
+	}
+
+	// MARK: - 材料
+
+	/// 新的空白筆記本，先給一頁橫線紙
+	@discardableResult
+	func createNotebook(named name: String, in folderID: UUID?) -> Material {
+		let material = Material(name: name, folderID: folderID, pages: [CanvasPage()])
+		library.materials.append(material)
+		saveLibrary()
+		return material
+	}
+
+	/// 匯入 PDF（每頁一張紙）或圖片（一張紙）成一份新材料，名字用檔名
+	@discardableResult
+	func importMaterial(from source: URL, in folderID: UUID?) throws -> Material {
+		let material = Material(
+			name: source.deletingPathExtension().lastPathComponent, folderID: folderID, pages: try copyAsPages(source))
+		library.materials.append(material)
+		saveLibrary()
+		return material
+	}
+
+	func renameMaterial(_ id: UUID, to name: String) {
+		guard let index = materialIndex(id) else { return }
+		library.materials[index].name = name
+		saveLibrary()
+	}
+
+	func deleteMaterial(_ id: UUID) {
+		guard let index = materialIndex(id) else { return }
+		let removed = library.materials.remove(at: index)
+		removed.pages.forEach(removeDrawing)
+		removeUnusedFiles(Set(removed.pages.compactMap(\.background)))
+		saveLibrary()
+	}
+
+	// MARK: - 頁
+
+	/// 在某頁後面插一頁，大小跟那一頁一樣；回傳新頁的索引
+	@discardableResult
+	func addPage(to materialID: UUID, after index: Int, ruled: Bool = true) -> Int {
+		guard let m = materialIndex(materialID) else { return index }
+		let pages = library.materials[m].pages
+		let at = min(index + 1, pages.count)
+		let size = pages.indices.contains(index) ? pages[index].size : CanvasPage.blankSize
+		library.materials[m].pages.insert(CanvasPage(size: size, ruled: ruled), at: at)
+		saveLibrary()
+		return at
+	}
+
+	/// 把 PDF 或圖片的頁插進這份材料的某頁後面，回傳第一張新頁的索引
+	func insertFile(from source: URL, into materialID: UUID, after index: Int) throws -> Int {
+		guard let m = materialIndex(materialID) else { return index }
+		let newPages = try copyAsPages(source)
+		let at = min(index + 1, library.materials[m].pages.count)
+		library.materials[m].pages.insert(contentsOf: newPages, at: at)
+		saveLibrary()
+		return at
+	}
+
+	/// 刪一頁（連筆跡檔）。每份材料至少留一頁
+	func deletePage(_ pageID: UUID, from materialID: UUID) {
+		guard let m = materialIndex(materialID), library.materials[m].pages.count > 1,
+			let p = library.materials[m].pages.firstIndex(where: { $0.id == pageID })
+		else { return }
+		let removed = library.materials[m].pages.remove(at: p)
+		removeDrawing(removed)
+		removeUnusedFiles(removed.background.map { [$0] } ?? [])
+		saveLibrary()
+	}
+
+	/// 複製一頁插在它後面：底、大小、筆跡都一樣，圈選過的塊不帶（那是對到原頁的題）
+	@discardableResult
+	func duplicatePage(_ pageID: UUID, in materialID: UUID) -> Int? {
+		guard let m = materialIndex(materialID),
+			let p = library.materials[m].pages.firstIndex(where: { $0.id == pageID })
+		else { return nil }
+		let source = library.materials[m].pages[p]
+		let copy = CanvasPage(background: source.background, size: source.size, ruled: source.ruled)
+		let ink = pendingData[pageID] ?? drawing(for: pageID).dataRepresentation()
+		try? ink.write(to: drawingURL(copy.id), options: .atomic)
+		library.materials[m].pages.insert(copy, at: p + 1)
+		saveLibrary()
+		return p + 1
+	}
+
+	func movePages(in materialID: UUID, from offsets: IndexSet, to destination: Int) {
+		guard let m = materialIndex(materialID) else { return }
+		library.materials[m].pages.move(fromOffsets: offsets, toOffset: destination)
+		saveLibrary()
 	}
 
 	// MARK: - 筆跡
@@ -81,56 +226,82 @@ final class CanvasStore: ObservableObject {
 		try? data.write(to: drawingURL(pageID), options: .atomic)
 	}
 
-	// MARK: - 頁與塊
-
-	/// 在某頁後面插一頁，回傳新頁的索引
-	@discardableResult
-	func addPage(after index: Int) -> Int {
-		let at = min(index + 1, pages.count)
-		pages.insert(CanvasPage(), at: at)
-		savePages()
-		return at
+	private func removeDrawing(_ page: CanvasPage) {
+		pendingSaves.removeValue(forKey: page.id)?.cancel()
+		pendingData[page.id] = nil
+		try? FileManager.default.removeItem(at: drawingURL(page.id))
 	}
+
+	// MARK: - 塊
 
 	func addBlock(_ block: CanvasBlock, to pageID: UUID) {
-		guard let index = pages.firstIndex(where: { $0.id == pageID }) else { return }
-		pages[index].blocks.append(block)
-		savePages()
+		for m in library.materials.indices {
+			guard let p = library.materials[m].pages.firstIndex(where: { $0.id == pageID }) else { continue }
+			library.materials[m].pages[p].blocks.append(block)
+			saveLibrary()
+			return
+		}
 	}
 
-	// MARK: - 匯入講義當底
+	/// blockID → 哪一頁的哪一塊
+	func block(_ id: UUID) -> (page: CanvasPage, block: CanvasBlock)? {
+		for material in library.materials {
+			for page in material.pages {
+				if let block = page.blocks.first(where: { $0.id == id }) { return (page, block) }
+			}
+		}
+		return nil
+	}
 
-	/// 底圖固定用 iPad 橫向最寬的 1194pt 畫、@2x 像素；顯示時縮到紙的寬度
+	// MARK: - 匯入的原檔與底圖
+
+	/// 底圖固定用 iPad 橫向最寬的 1194pt 畫、@2x 像素；顯示時縮到頁的大小
 	static let backgroundWidth: CGFloat = 1194
 
 	private func fileURL(_ background: CanvasBackground) -> URL {
 		filesDir.appendingPathComponent("\(background.fileID.uuidString).\(background.ext)")
 	}
 
-	/// 把 PDF（每頁一張紙）或圖片（一張紙）插在某頁後面，回傳第一張新頁的索引
-	func importFile(from source: URL, after index: Int) throws -> Int {
+	/// 原檔複製進 canvas/files/，每頁（圖片就一頁）變一張紙，大小照原檔比例、寬 768
+	private func copyAsPages(_ source: URL) throws -> [CanvasPage] {
 		let accessing = source.startAccessingSecurityScopedResource()
 		defer { if accessing { source.stopAccessingSecurityScopedResource() } }
 		let fileID = UUID()
 		let ext = source.pathExtension.lowercased()
 		let target = filesDir.appendingPathComponent("\(fileID.uuidString).\(ext)")
 		try FileManager.default.copyItem(at: source, to: target)
-		let pageCount = ext == "pdf" ? (PDFDocument(url: target)?.pageCount ?? 0) : 1
-		guard pageCount > 0 else { throw CocoaError(.fileReadCorruptFile) }
-		let at = min(index + 1, pages.count)
-		let newPages = (0..<pageCount).map { page in
-			CanvasPage(background: CanvasBackground(fileID: fileID, ext: ext, pageIndex: page))
+		let sizes: [CGSize]
+		if ext == "pdf" {
+			guard let pdf = PDFDocument(url: target) else { throw CocoaError(.fileReadCorruptFile) }
+			sizes = (0..<pdf.pageCount).compactMap { pdf.page(at: $0)?.bounds(for: .mediaBox).size }
+		} else {
+			sizes = UIImage(contentsOfFile: target.path).map { [$0.size] } ?? []
 		}
-		pages.insert(contentsOf: newPages, at: at)
-		savePages()
-		return at
+		guard !sizes.isEmpty else {
+			try? FileManager.default.removeItem(at: target)
+			throw CocoaError(.fileReadCorruptFile)
+		}
+		let width = CanvasPage.blankSize.width
+		return sizes.enumerated().map { index, size in
+			CanvasPage(
+				background: CanvasBackground(fileID: fileID, ext: ext, pageIndex: index),
+				size: CGSize(width: width, height: width * size.height / max(size.width, 1)))
+		}
+	}
+
+	/// 沒有任何一頁還墊著的原檔就刪掉
+	private func removeUnusedFiles(_ candidates: Set<CanvasBackground>) {
+		let inUse = Set(library.materials.flatMap(\.pages).compactMap { $0.background?.fileID })
+		for background in candidates where !inUse.contains(background.fileID) {
+			try? FileManager.default.removeItem(at: fileURL(background))
+		}
 	}
 
 	/// 這一頁的底圖（沒匯入就 nil）
 	func backgroundImage(for page: CanvasPage) -> UIImage? {
 		guard let background = page.background else { return nil }
-		let key = "\(background.fileID.uuidString)-\(background.pageIndex)"
-		if let cached = backgroundCache[key] { return cached }
+		let key = "\(background.fileID.uuidString)-\(background.pageIndex)" as NSString
+		if let cached = backgroundCache.object(forKey: key) { return cached }
 		let url = fileURL(background)
 		let image: UIImage?
 		if background.ext == "pdf" {
@@ -142,15 +313,7 @@ final class CanvasStore: ObservableObject {
 		} else {
 			image = UIImage(contentsOfFile: url.path)
 		}
-		if let image { backgroundCache[key] = image }
+		if let image { backgroundCache.setObject(image, forKey: key) }
 		return image
-	}
-
-	/// blockID → 哪一頁的哪一塊。下一輪把標註畫回紙上就靠這個查框
-	func block(_ id: UUID) -> (page: CanvasPage, block: CanvasBlock)? {
-		for page in pages {
-			if let block = page.blocks.first(where: { $0.id == id }) { return (page, block) }
-		}
-		return nil
 	}
 }

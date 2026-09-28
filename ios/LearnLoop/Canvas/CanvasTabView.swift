@@ -9,6 +9,8 @@ import UniformTypeIdentifiers
 struct CanvasTabView: View {
 	@ObservedObject var store: CardStore
 	@StateObject private var canvas: CanvasStore
+	/// 正在寫的材料（書架出來之前先固定開上次那份）
+	@State private var materialID: UUID?
 	@State private var pageIndex = 0
 	@State private var penOn: Bool
 	@State private var tool: CanvasTool = .pen(0)
@@ -60,7 +62,8 @@ struct CanvasTabView: View {
 		_panelWidth = State(initialValue: saved > 0 ? CGFloat(saved) : Self.defaultPanelWidth)
 	}
 
-	private var page: CanvasPage { canvas.pages[min(pageIndex, canvas.pages.count - 1)] }
+	private var pages: [CanvasPage] { materialID.flatMap { canvas.material($0) }?.pages ?? [CanvasPage()] }
+	private var page: CanvasPage { pages[min(pageIndex, pages.count - 1)] }
 
 	var body: some View {
 		// 外層一個 NavigationStack：撐住頂端安全區（分頁列底下），概念 chip 的跳轉也走它（整頁推入，跟別的分頁一樣）
@@ -86,8 +89,11 @@ struct CanvasTabView: View {
 		.onAppear {
 			guard !restoredPage else { return }
 			restoredPage = true
-			if let saved = canvas.pages.firstIndex(where: { $0.id.uuidString == store.canvasPageID }) {
-				pageIndex = saved
+			let saved = UUID(uuidString: store.canvasPageID).flatMap(canvas.material(containing:))
+			let material = saved ?? canvas.library.materials.first ?? canvas.createNotebook(named: "筆記本", in: nil)
+			materialID = material.id
+			if let index = material.pages.firstIndex(where: { $0.id.uuidString == store.canvasPageID }) {
+				pageIndex = index
 			}
 		}
 		.onChange(of: pageIndex) { store.canvasPageID = page.id.uuidString }
@@ -97,7 +103,8 @@ struct CanvasTabView: View {
 		// 講義當底：PDF 每頁一張紙、圖片一張紙，插在目前頁後面
 		.fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .image]) { result in
 			do {
-				pageIndex = try canvas.importFile(from: try result.get(), after: pageIndex)
+				guard let materialID else { return }
+				pageIndex = try canvas.insertFile(from: try result.get(), into: materialID, after: pageIndex)
 			} catch {
 				errorText = error.localizedDescription
 			}
@@ -124,12 +131,14 @@ struct CanvasTabView: View {
 		Button("上一頁", systemImage: "chevron.left") { pageIndex -= 1 }
 			.disabled(pageIndex == 0)
 		// 工具列跟分頁列同一排，位子少，頁碼只寫「1 / 3」
-		Text("\(pageIndex + 1) / \(canvas.pages.count)")
+		Text("\(pageIndex + 1) / \(pages.count)")
 			.font(.caption.monospacedDigit())
 			.foregroundStyle(.secondary)
 		Button("下一頁", systemImage: "chevron.right") { pageIndex += 1 }
-			.disabled(pageIndex >= canvas.pages.count - 1)
-		Button("新增頁", systemImage: "plus") { pageIndex = canvas.addPage(after: pageIndex) }
+			.disabled(pageIndex >= pages.count - 1)
+		Button("新增頁", systemImage: "plus") {
+			if let materialID { pageIndex = canvas.addPage(to: materialID, after: pageIndex) }
+		}
 		Button("匯入講義", systemImage: "square.and.arrow.down") { importing = true }
 	}
 
