@@ -16,6 +16,10 @@ struct CanvasTabView: View {
 	/// 再點一次已選中的筆：開粗細選單（值是哪一色的筆，popover 要掛在那顆上）
 	@State private var penMenu: Int?
 	@State private var eraserMenu = false
+	/// 圖形沿用上次選的筆色；形狀記住上次選的
+	@State private var lastPen = 0
+	@State private var shapeKind: ShapeKind = .line
+	@State private var shapeMenu = false
 	@State private var importing = false
 	/// 上次停的頁只在第一次出現時拉回來，之後切分頁回來維持當下
 	@State private var restoredPage = false
@@ -172,7 +176,7 @@ struct CanvasTabView: View {
 					// 點大小跟著粗細：下筆前就看得出多粗、什麼色。已選中再點一次開粗細選單
 					barButton("筆", systemImage: "pencil.tip", selected: tool == .pen(index),
 						dot: Color(CanvasTool.penColors[index]), dotSize: dotSize(settings.penWidth)) {
-						if tool == .pen(index) { penMenu = index } else { tool = .pen(index) }
+						if tool == .pen(index) { penMenu = index } else { tool = .pen(index); lastPen = index }
 					}
 					.popover(isPresented: Binding(
 						get: { penMenu == index }, set: { if !$0 { penMenu = nil } })) {
@@ -189,6 +193,11 @@ struct CanvasTabView: View {
 				}
 				.popover(isPresented: $eraserMenu) { eraserOptions }
 				barButton("套索", systemImage: "lasso", selected: tool == .lasso) { tool = .lasso }
+				// 已選中再點一次換形狀
+				barButton("圖形", systemImage: shapeKind.systemImage, selected: tool.isShape) {
+					if tool.isShape { shapeMenu = true } else { tool = .shape(shapeKind, lastPen) }
+				}
+				.popover(isPresented: $shapeMenu) { shapeOptions }
 				barDivider
 				barButton("復原", systemImage: "arrow.uturn.backward", selected: false) {
 					handle.view?.undoManager?.undo()
@@ -254,6 +263,29 @@ struct CanvasTabView: View {
 		}
 		.padding(16)
 		.frame(width: 260)
+		.presentationCompactAdaptation(.popover)
+	}
+
+	/// 圖形：直線、方框、圓，顏色粗細跟著筆
+	private var shapeOptions: some View {
+		HStack(spacing: 4) {
+			ForEach(ShapeKind.allCases, id: \.self) { kind in
+				Button {
+					shapeKind = kind
+					tool = .shape(kind, lastPen)
+					shapeMenu = false
+				} label: {
+					VStack(spacing: 4) {
+						Image(systemName: kind.systemImage).font(.system(size: 20))
+						Text(kind.label).font(.caption2)
+					}
+					.frame(width: 56, height: 52)
+					.background(kind == shapeKind ? Color(.systemGray5) : .clear, in: RoundedRectangle(cornerRadius: 8))
+				}
+				.buttonStyle(.plain)
+			}
+		}
+		.padding(8)
 		.presentationCompactAdaptation(.popover)
 	}
 
