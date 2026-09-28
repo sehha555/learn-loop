@@ -89,10 +89,16 @@ final class LibraryTests: XCTestCase {
 		let dir = tempDir()
 		let canvas = dir.appendingPathComponent("canvas", isDirectory: true)
 		try FileManager.default.createDirectory(at: canvas, withIntermediateDirectories: true)
-		let legacy = [CanvasPage(), CanvasPage()]
+		// 第三頁墊一張橫的 PDF 投影片：頁高要照投影片比例，不能被拉成 A4
+		let fileID = UUID()
+		try FileManager.default.createDirectory(at: canvas.appendingPathComponent("files"), withIntermediateDirectories: true)
+		try UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 842, height: 595)).pdfData { $0.beginPage() }
+			.write(to: canvas.appendingPathComponent("files/\(fileID.uuidString).pdf"))
+		let legacy = [CanvasPage(), CanvasPage(), CanvasPage()]
 		// 舊格式沒有 size、ruled：手寫 JSON，確定讀得進來
-		let json = legacy.map { #"{"id":"\#($0.id.uuidString)","createdAt":0,"blocks":[]}"# }.joined(separator: ",")
-		try Data("[\(json)]".utf8).write(to: canvas.appendingPathComponent("index.json"))
+		var json = legacy.map { #"{"id":"\#($0.id.uuidString)","createdAt":0,"blocks":[]"# }
+		json[2] += #","background":{"fileID":"\#(fileID.uuidString)","ext":"pdf","pageIndex":0}"#
+		try Data("[\(json.map { $0 + "}" }.joined(separator: ","))]".utf8).write(to: canvas.appendingPathComponent("index.json"))
 		try oneStroke(to: CGPoint(x: 300, y: 3000)).dataRepresentation()
 			.write(to: canvas.appendingPathComponent("\(legacy[1].id.uuidString).drawing"))
 
@@ -103,6 +109,7 @@ final class LibraryTests: XCTestCase {
 		XCTAssertEqual(material.pages.map(\.id), legacy.map(\.id))
 		XCTAssertEqual(material.pages[0].size, CGSize(width: 1194, height: 1194 * 1.414))
 		XCTAssertGreaterThanOrEqual(material.pages[1].size.height, 3000)
+		XCTAssertEqual(material.pages[2].size.height, 1194 * 595 / 842, accuracy: 1)
 		XCTAssertEqual(store.drawing(for: legacy[1].id).strokes.count, 1)
 		XCTAssertFalse(FileManager.default.fileExists(atPath: canvas.appendingPathComponent("index.json").path))
 		XCTAssertTrue(FileManager.default.fileExists(atPath: canvas.appendingPathComponent("index.migrated.json").path))

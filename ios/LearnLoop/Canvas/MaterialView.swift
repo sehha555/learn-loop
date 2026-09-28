@@ -426,7 +426,9 @@ struct MaterialView: View {
 		let image = UIGraphicsImageRenderer(size: rect.size).image { context in
 			UIColor.white.setFill()
 			context.fill(CGRect(origin: .zero, size: rect.size))
-			hit.background?.draw(in: CGRect(origin: CGPoint(x: -rect.minX, y: -rect.minY), size: hit.page.size))
+			if let background = hit.background {
+				background.draw(in: CanvasPage.backgroundRect(for: background, pageWidth: hit.page.size.width).offsetBy(dx: -rect.minX, dy: -rect.minY))
+			}
 			ink.draw(in: CGRect(origin: .zero, size: rect.size))
 		}
 		let blockID = UUID()

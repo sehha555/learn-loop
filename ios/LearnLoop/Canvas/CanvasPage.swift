@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// 畫布的一頁。筆跡另外存成 canvas/<id>.drawing（PKDrawing 的二進位），這裡只記結構：
 /// 頁多大、底下墊什麼、圈選過哪些塊、各對到哪棵樹
@@ -17,6 +18,12 @@ struct CanvasPage: Identifiable, Codable, Hashable {
 	static let blankSize = CGSize(width: 768, height: 1086)
 	/// 橫線頁的線距（頁內 pt）
 	static let lineSpacing: CGFloat = 36
+
+	/// 底圖在頁內的框：頁寬、照底圖比例、貼齊上緣。匯入的頁剛好填滿；
+	/// 搬進書架的舊頁可能比底圖長（底圖下面還有寫字），底圖不能被拉長
+	static func backgroundRect(for image: UIImage, pageWidth: CGFloat) -> CGRect {
+		CGRect(x: 0, y: 0, width: pageWidth, height: pageWidth * image.size.height / max(image.size.width, 1))
+	}
 
 	init(
 		id: UUID = UUID(), createdAt: Date = Date(), blocks: [CanvasBlock] = [], background: CanvasBackground? = nil,

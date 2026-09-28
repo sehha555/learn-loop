@@ -41,7 +41,7 @@ final class CanvasStore: ObservableObject {
 	}
 
 	/// 書架出現前只有一本全域筆記（canvas/index.json）：整本搬成書架最上層的「舊畫布」。
-	/// 舊頁沒有固定大小，寬用舊底圖的 1194、高要蓋得住寫過的筆跡。index.json 改名留著，不刪
+	/// 舊頁沒有固定大小，寬用舊底圖的 1194、高要蓋得住底圖和寫過的筆跡。index.json 改名留著，不刪
 	private func migrateLegacyIndex() {
 		let indexURL = dir.appendingPathComponent("index.json")
 		guard let data = try? Data(contentsOf: indexURL),
@@ -50,7 +50,8 @@ final class CanvasStore: ObservableObject {
 		let width = Self.backgroundWidth
 		for index in pages.indices {
 			let ink = drawing(for: pages[index].id).bounds
-			pages[index].size = CGSize(width: width, height: max(ink.isNull ? 0 : ink.maxY + 200, width * 1.414))
+			let paper = backgroundImage(for: pages[index]).map { CanvasPage.backgroundRect(for: $0, pageWidth: width).height } ?? width * 1.414
+			pages[index].size = CGSize(width: width, height: max(ink.isNull ? 0 : ink.maxY + 200, paper))
 		}
 		library.materials = [Material(name: "舊畫布", folderID: nil, pages: pages)]
 		saveLibrary()
@@ -176,7 +177,7 @@ final class CanvasStore: ObservableObject {
 		else { return nil }
 		let source = library.materials[m].pages[p]
 		let copy = CanvasPage(background: source.background, size: source.size, ruled: source.ruled)
-		let ink = pendingData[pageID] ?? drawing(for: pageID).dataRepresentation()
+		let ink = drawing(for: pageID).dataRepresentation()
 		try? ink.write(to: drawingURL(copy.id), options: .atomic)
 		library.materials[m].pages.insert(copy, at: p + 1)
 		saveLibrary()
@@ -195,8 +196,9 @@ final class CanvasStore: ObservableObject {
 		dir.appendingPathComponent("\(pageID.uuidString).drawing")
 	}
 
+	/// 還沒寫下去的筆跡優先：畫布在半秒內被收掉又建回來時，才不會讀到舊檔、再把舊的存回去
 	func drawing(for pageID: UUID) -> PKDrawing {
-		guard let data = try? Data(contentsOf: drawingURL(pageID)),
+		guard let data = pendingData[pageID] ?? (try? Data(contentsOf: drawingURL(pageID))),
 			let drawing = try? PKDrawing(data: data)
 		else { return PKDrawing() }
 		return drawing
@@ -301,13 +303,12 @@ final class CanvasStore: ObservableObject {
 	func thumbnail(for page: CanvasPage, width: CGFloat) -> UIImage {
 		let scale = width / max(page.size.width, 1)
 		let size = CGSize(width: width, height: page.size.height * scale)
-		let ink = (pendingData[page.id].flatMap { try? PKDrawing(data: $0) } ?? drawing(for: page.id))
-			.image(from: CGRect(origin: .zero, size: page.size), scale: scale * UIScreen.main.scale)
+		let ink = drawing(for: page.id).image(from: CGRect(origin: .zero, size: page.size), scale: scale * UIScreen.main.scale)
 		return UIGraphicsImageRenderer(size: size).image { context in
 			UIColor.white.setFill()
 			context.fill(CGRect(origin: .zero, size: size))
 			if let background = backgroundImage(for: page) {
-				background.draw(in: CGRect(origin: .zero, size: size))
+				background.draw(in: CanvasPage.backgroundRect(for: background, pageWidth: size.width))
 			} else if page.ruled {
 				// 橫線頁跟空白頁在總覽裡要分得出來
 				UIColor.systemGray5.setFill()

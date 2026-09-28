@@ -226,6 +226,8 @@ final class PaperCanvasView: PKCanvasView {
 		self.pageID = pageID
 		self.pageSize = pageSize
 		super.init(frame: .zero)
+		// scale 的 didSet 只在值變了才設 contentSize；剛好 1 倍時要先有
+		contentSize = pageSize
 		isScrollEnabled = false
 		pinchGestureRecognizer?.isEnabled = false
 		showsVerticalScrollIndicator = false
@@ -313,7 +315,7 @@ final class PaperCanvasView: PKCanvasView {
 		let page = CGRect(x: 0, y: 0, width: pageSize.width * scale, height: pageSize.height * scale)
 		if linesView.frame != page { linesView.frame = page }
 		linesView.scale = scale
-		backgroundView.frame = background == nil ? .zero : page
+		backgroundView.frame = background.map { CanvasPage.backgroundRect(for: $0, pageWidth: pageSize.width * scale) } ?? .zero
 	}
 
 	/// 套用工具。writing = 筆拿著、不在圈選中
