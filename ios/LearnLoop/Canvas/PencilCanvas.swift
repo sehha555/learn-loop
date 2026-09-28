@@ -1,8 +1,10 @@
 import PencilKit
 import SwiftUI
 
-/// 活的 PKCanvasView 的弱參考。圈選送出時讀 drawing／contentOffset／底圖用，復原／重做也從這拿
+/// 讓 SwiftUI 那邊拿得到活的 UIKit 畫布：整疊頁（捲到某頁、圈選時找是哪一頁），
+/// 以及最後寫過的那一頁（復原／重做送給它）
 final class CanvasHandle {
+	weak var stack: PageStackView?
 	weak var view: PaperCanvasView?
 }
 
@@ -134,6 +136,10 @@ private final class RuledLinesView: UIView {
 	var showsLines = true {
 		didSet { setNeedsDisplay() }
 	}
+	/// 頁縮放多少倍，線距跟著縮放
+	var scale: CGFloat = 1 {
+		didSet { if scale != oldValue { setNeedsDisplay() } }
+	}
 
 	override init(frame: CGRect) {
 		super.init(frame: frame)
@@ -148,11 +154,12 @@ private final class RuledLinesView: UIView {
 		guard showsLines else { return }
 		UIColor.systemGray5.setStroke()
 		let path = UIBezierPath()
-		var y = (rect.minY / Self.spacing).rounded(.down) * Self.spacing + Self.spacing
+		let spacing = Self.spacing * scale
+		var y = (rect.minY / spacing).rounded(.down) * spacing + spacing
 		while y <= rect.maxY {
 			path.move(to: CGPoint(x: rect.minX, y: y))
 			path.addLine(to: CGPoint(x: rect.maxX, y: y))
-			y += Self.spacing
+			y += spacing
 		}
 		path.lineWidth = 1
 		path.stroke()
@@ -169,22 +176,40 @@ private final class TouchDownPan: UIPanGestureRecognizer {
 	}
 }
 
-/// 底下墊一張講義（或淡橫線）的 PKCanvasView：底圖是 content 的一部分，跟筆跡一起捲；
-/// 內容高度跟著底圖或筆跡長：講義比螢幕高、或寫到底了，都能往下捲著寫
+/// 固定大小的一頁：底下墊講義（或淡橫線）的 PKCanvasView。自己不捲，捲動交給外面整疊頁（PageStackView）；
+/// 用 PencilKit 自己的 zoomScale 縮放到畫面寬度，筆跡座標永遠是頁內座標、放大也清楚
 final class PaperCanvasView: PKCanvasView {
 	private let backgroundView = UIImageView()
 	private let linesView = RuledLinesView()
 
+	let pageID: UUID
+	let pageSize: CGSize
+	/// 開始寫（筆或圖形）時通知外面：復原要送給最後寫過的那一頁
+	var onUse: (() -> Void)?
+
 	var background: UIImage? {
 		didSet {
 			backgroundView.image = background
-			linesView.showsLines = background == nil
+			linesView.showsLines = background == nil && ruled
 			setNeedsLayout()
 		}
 	}
 
-	/// 底圖在 content 座標裡佔的框（圈選時要連底圖一起裁）
-	var backgroundFrame: CGRect { backgroundView.frame }
+	var ruled = true {
+		didSet { linesView.showsLines = background == nil && ruled }
+	}
+
+	/// 頁顯示成幾倍大（頁寬 768pt，螢幕比較寬就放大）
+	var scale: CGFloat = 1 {
+		didSet {
+			guard scale != oldValue else { return }
+			minimumZoomScale = scale
+			maximumZoomScale = scale
+			zoomScale = scale
+			contentSize = CGSize(width: pageSize.width * scale, height: pageSize.height * scale)
+			setNeedsLayout()
+		}
+	}
 
 	/// 拿著橡皮擦時的擦除寬度，其他工具是 nil。擦的當下在筆尖畫一個這麼大的圈：
 	/// iPad Air 的 Pencil 不支援懸停，下筆前看不到範圍，至少擦的時候看得到
@@ -198,9 +223,17 @@ final class PaperCanvasView: PKCanvasView {
 	private let shapePan = TouchDownPan()
 	private let shapePreview = CAShapeLayer()
 
-	override init(frame: CGRect) {
-		super.init(frame: frame)
-		backgroundView.contentMode = .scaleAspectFit
+	init(pageID: UUID, pageSize: CGSize) {
+		self.pageID = pageID
+		self.pageSize = pageSize
+		super.init(frame: .zero)
+		isScrollEnabled = false
+		pinchGestureRecognizer?.isEnabled = false
+		showsVerticalScrollIndicator = false
+		showsHorizontalScrollIndicator = false
+		contentInsetAdjustmentBehavior = .never
+		// 頁一定跟原檔同比例，直接撐滿
+		backgroundView.contentMode = .scaleToFill
 		// PencilKit 不透明時會自己塗一層底色蓋住墊在下面的 view，所以畫布透明、白底交給 linesView
 		backgroundColor = .clear
 		isOpaque = false
@@ -229,13 +262,18 @@ final class PaperCanvasView: PKCanvasView {
 	}
 
 	/// 拉圖形：拖的時候畫預覽，放手轉成筆畫加進 drawing
+	/// 手勢給的是放大後的座標，除回頁內座標
 	@objc private func dragShape(_ gesture: TouchDownPan) {
-		guard let shape, let start = gesture.touchDown else { return }
-		let point = gesture.location(in: self)
+		guard let shape, let touchDown = gesture.touchDown else { return }
+		let start = CGPoint(x: touchDown.x / zoomScale, y: touchDown.y / zoomScale)
+		let location = gesture.location(in: self)
+		let point = CGPoint(x: location.x / zoomScale, y: location.y / zoomScale)
 		switch gesture.state {
 		case .began:
+			onUse?()
 			shapePreview.strokeColor = shape.color.cgColor
 			shapePreview.lineWidth = max(shape.width, ShapeKind.minPointSize)
+			shapePreview.setAffineTransform(CGAffineTransform(scaleX: zoomScale, y: zoomScale))
 		case .changed:
 			shapePreview.path = shape.kind.previewPath(from: start, to: point)
 		default:
@@ -260,9 +298,10 @@ final class PaperCanvasView: PKCanvasView {
 			eraserRing.isHidden = true
 			return
 		}
-		// 自己是 scroll view，location(in: self) 就是 content 座標，圈跟著內容捲
-		eraserRing.bounds.size = CGSize(width: eraserWidth, height: eraserWidth)
-		eraserRing.layer.cornerRadius = eraserWidth / 2
+		// 擦除寬度是頁內大小，畫面上要乘上放大倍數
+		let size = eraserWidth * zoomScale
+		eraserRing.bounds.size = CGSize(width: size, height: size)
+		eraserRing.layer.cornerRadius = size / 2
 		eraserRing.center = gesture.location(in: self)
 		eraserRing.isHidden = false
 		bringSubviewToFront(eraserRing)
@@ -272,109 +311,23 @@ final class PaperCanvasView: PKCanvasView {
 
 	override func layoutSubviews() {
 		super.layoutSubviews()
-		guard bounds.width > 0 else { return }
-		var height: CGFloat = 0
-		if let background {
-			height = bounds.width * background.size.height / max(background.size.width, 1)
-			backgroundView.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
-		} else {
-			backgroundView.frame = .zero
-		}
-		// 最後一筆底下永遠留一整個螢幕的空白：寫到底了往上捲就有地方繼續寫
-		let ink = drawing.bounds.isNull ? 0 : drawing.bounds.maxY
-		contentSize = CGSize(width: bounds.width, height: max(height, ink + bounds.height, bounds.height * 1.5))
-		let lines = CGRect(origin: .zero, size: contentSize)
-		if linesView.frame != lines { linesView.frame = lines }
-	}
-}
-
-/// PKCanvasView 包成 SwiftUI。一頁一個 PKDrawing，換頁就換 drawing；停筆存檔交給 CanvasStore。
-/// 圈選模式時整個 canvas 不收觸控（interactive = false），筆畫才不會跟拉框打架
-struct PencilCanvas: UIViewRepresentable {
-	let pageID: UUID
-	@ObservedObject var store: CanvasStore
-	var interactive: Bool
-	/// 筆開著才畫得出線；關著時手指捲紙看內容
-	var penOn: Bool
-	var tool: CanvasTool
-	var settings: CanvasToolSettings
-	var background: UIImage?
-	/// 讓 SwiftUI 那邊拿得到活的 canvas（圈選時要當下的筆跡與捲動位置，不能等存檔）
-	let handle: CanvasHandle
-	/// 捲動時回報位置：紙上的編號標記要跟著筆跡一起動
-	var onScroll: (CGPoint) -> Void = { _ in }
-
-	func makeUIView(context: Context) -> PaperCanvasView {
-		let view = PaperCanvasView()
-		handle.view = view
-		view.background = background
-		// 真機只收 Pencil，手掌撐在紙上不會畫出線；模擬器沒 Pencil，手指要能畫
-		#if targetEnvironment(simulator)
-		view.drawingPolicy = .anyInput
-		#else
-		view.drawingPolicy = .pencilOnly
-		#endif
-		view.delegate = context.coordinator
-		view.drawing = store.drawing(for: pageID)
-		view.tool = tool.pkTool(settings)
-		context.coordinator.pageID = pageID
-		context.coordinator.tool = tool
-		context.coordinator.settings = settings
-		return view
+		let page = CGRect(x: 0, y: 0, width: pageSize.width * scale, height: pageSize.height * scale)
+		if linesView.frame != page { linesView.frame = page }
+		linesView.scale = scale
+		backgroundView.frame = background == nil ? .zero : page
 	}
 
-	func updateUIView(_ view: PaperCanvasView, context: Context) {
-		if context.coordinator.pageID != pageID {
-			context.coordinator.pageID = pageID
-			view.drawing = store.drawing(for: pageID)
-			view.contentOffset = .zero
-		}
-		if view.background !== background { view.background = background }
-		if context.coordinator.tool != tool || context.coordinator.settings != settings {
-			context.coordinator.tool = tool
-			context.coordinator.settings = settings
-			view.tool = tool.pkTool(settings)
-		}
-		view.isUserInteractionEnabled = interactive
-		let writing = interactive && penOn
+	/// 套用工具。writing = 筆拿著、不在圈選中
+	func apply(tool: CanvasTool, settings: CanvasToolSettings, writing: Bool) {
+		self.tool = tool.pkTool(settings)
 		// 圖形工具時畫筆手勢讓給 shapePan
 		if writing, case .shape(let kind, let color) = tool {
-			view.drawingGestureRecognizer.isEnabled = false
-			view.shape = (kind, CanvasTool.penColors[color], settings.penWidth)
+			drawingGestureRecognizer.isEnabled = false
+			shape = (kind, CanvasTool.penColors[color], settings.penWidth)
 		} else {
-			view.drawingGestureRecognizer.isEnabled = writing
-			view.shape = nil
+			drawingGestureRecognizer.isEnabled = writing
+			shape = nil
 		}
-		view.eraserWidth = writing && tool == .eraser ? settings.eraserWidth : nil
-		// 手指也能畫（模擬器）時 PencilKit 把捲動改成兩指；筆收起來就該一指捲
-		view.panGestureRecognizer.minimumNumberOfTouches = writing && view.drawingPolicy == .anyInput ? 2 : 1
-	}
-
-	func makeCoordinator() -> Coordinator { Coordinator(store: store, onScroll: onScroll) }
-
-	final class Coordinator: NSObject, PKCanvasViewDelegate {
-		let store: CanvasStore
-		var pageID: UUID?
-		var tool: CanvasTool?
-		var settings: CanvasToolSettings?
-		let onScroll: (CGPoint) -> Void
-
-		init(store: CanvasStore, onScroll: @escaping (CGPoint) -> Void) {
-			self.store = store
-			self.onScroll = onScroll
-		}
-
-		func scrollViewDidScroll(_ scrollView: UIScrollView) {
-			// 換頁時 updateUIView 裡歸零也會觸發，那時候不能直接改 SwiftUI 狀態
-			let offset = scrollView.contentOffset
-			DispatchQueue.main.async { self.onScroll(offset) }
-		}
-
-		func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-			// 寫到底了紙要跟著長
-			canvasView.setNeedsLayout()
-			guard let pageID else { return }
-			store.saveDrawing(canvasView.drawing, for: pageID)
-		}
+		eraserWidth = writing && tool == .eraser ? settings.eraserWidth : nil
 	}
 }

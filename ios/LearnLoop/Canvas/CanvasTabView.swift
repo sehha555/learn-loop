@@ -25,8 +25,6 @@ struct CanvasTabView: View {
 	@State private var importing = false
 	/// 上次停的頁只在第一次出現時拉回來，之後切分頁回來維持當下
 	@State private var restoredPage = false
-	/// 紙目前捲到哪：標記照這個位移，跟筆跡一起動
-	@State private var scrollOffset: CGPoint = .zero
 	@Environment(\.scenePhase) private var scenePhase
 	private let handle = CanvasHandle()
 
@@ -62,8 +60,7 @@ struct CanvasTabView: View {
 		_panelWidth = State(initialValue: saved > 0 ? CGFloat(saved) : Self.defaultPanelWidth)
 	}
 
-	private var pages: [CanvasPage] { materialID.flatMap { canvas.material($0) }?.pages ?? [CanvasPage()] }
-	private var page: CanvasPage { pages[min(pageIndex, pages.count - 1)] }
+	private var pages: [CanvasPage] { materialID.flatMap { canvas.material($0) }?.pages ?? [] }
 
 	var body: some View {
 		// 外層一個 NavigationStack：撐住頂端安全區（分頁列底下），概念 chip 的跳轉也走它（整頁推入，跟別的分頁一樣）
@@ -94,9 +91,12 @@ struct CanvasTabView: View {
 			materialID = material.id
 			if let index = material.pages.firstIndex(where: { $0.id.uuidString == store.canvasPageID }) {
 				pageIndex = index
+				handle.stack?.scroll(toPage: index)
 			}
 		}
-		.onChange(of: pageIndex) { store.canvasPageID = page.id.uuidString }
+		.onChange(of: pageIndex) {
+			if pages.indices.contains(pageIndex) { store.canvasPageID = pages[pageIndex].id.uuidString }
+		}
 		.onChange(of: scenePhase) { _, phase in
 			if phase != .active { canvas.flushSaves() }
 		}
@@ -105,6 +105,7 @@ struct CanvasTabView: View {
 			do {
 				guard let materialID else { return }
 				pageIndex = try canvas.insertFile(from: try result.get(), into: materialID, after: pageIndex)
+				handle.stack?.scroll(toPage: pageIndex)
 			} catch {
 				errorText = error.localizedDescription
 			}
@@ -114,11 +115,10 @@ struct CanvasTabView: View {
 	// MARK: - 紙
 
 	private var paper: some View {
-		PencilCanvas(
-			pageID: page.id, store: canvas, interactive: !selecting, penOn: penOn, tool: tool, settings: settings,
-			background: canvas.backgroundImage(for: page), handle: handle,
-			onScroll: { scrollOffset = $0 })
-			.overlay { blockMarks }
+		PageStack(
+			pages: pages, store: canvas, interactive: !selecting, penOn: penOn, tool: tool, settings: settings,
+			openCardID: openTopicID, handle: handle,
+			onCurrentPage: { pageIndex = $0 }, onOpenBlock: open)
 			.overlay { if selecting { selectionLayer } }
 			// 紙頂一條細工具列：頂端那排跟 iPad 的分頁列同一排，放不下
 			.overlay(alignment: .top) { penBar.padding(.top, 2).padding(.horizontal, 12) }
@@ -128,16 +128,19 @@ struct CanvasTabView: View {
 	/// 頁碼、翻頁、匯入，收在工具列右邊
 	@ViewBuilder
 	private var pageControls: some View {
-		Button("上一頁", systemImage: "chevron.left") { pageIndex -= 1 }
+		Button("上一頁", systemImage: "chevron.left") { handle.stack?.scroll(toPage: pageIndex - 1) }
 			.disabled(pageIndex == 0)
 		// 工具列跟分頁列同一排，位子少，頁碼只寫「1 / 3」
 		Text("\(pageIndex + 1) / \(pages.count)")
 			.font(.caption.monospacedDigit())
 			.foregroundStyle(.secondary)
-		Button("下一頁", systemImage: "chevron.right") { pageIndex += 1 }
+		Button("下一頁", systemImage: "chevron.right") { handle.stack?.scroll(toPage: pageIndex + 1) }
 			.disabled(pageIndex >= pages.count - 1)
 		Button("新增頁", systemImage: "plus") {
-			if let materialID { pageIndex = canvas.addPage(to: materialID, after: pageIndex) }
+			if let materialID {
+				pageIndex = canvas.addPage(to: materialID, after: pageIndex)
+				handle.stack?.scroll(toPage: pageIndex)
+			}
 		}
 		Button("匯入講義", systemImage: "square.and.arrow.down") { importing = true }
 	}
@@ -404,22 +407,20 @@ struct CanvasTabView: View {
 			errorText = AIError.noAPIKey.localizedDescription
 			return
 		}
-		let offset = handle.view?.contentOffset ?? .zero
-		let rect = selection.offsetBy(dx: offset.x, dy: offset.y)
-		let drawing = handle.view?.drawing ?? canvas.drawing(for: page.id)
+		// 框換成「落在哪一頁、頁內哪一塊」：座標都是頁內的，跟縮放、捲到哪無關
+		guard let hit = handle.stack?.hit(selection) else { return }
+		let rect = hit.rect
 		// PKDrawing 出來是透明背景，直接轉 JPEG 會變黑底；有講義底圖的話題目印在底圖上，
 		// 他的過程寫在旁邊，兩個都要給模型看 —— 白底、底圖、筆跡三層疊起來再裁
-		let ink = drawing.image(from: rect, scale: 2)
-		let backgroundImage = handle.view?.background
-		let backgroundFrame = handle.view?.backgroundFrame ?? .zero
+		let ink = hit.drawing.image(from: rect, scale: 2)
 		let image = UIGraphicsImageRenderer(size: rect.size).image { context in
 			UIColor.white.setFill()
 			context.fill(CGRect(origin: .zero, size: rect.size))
-			backgroundImage?.draw(in: backgroundFrame.offsetBy(dx: -rect.minX, dy: -rect.minY))
+			hit.background?.draw(in: CGRect(origin: CGPoint(x: -rect.minX, y: -rect.minY), size: hit.page.size))
 			ink.draw(in: CGRect(origin: .zero, size: rect.size))
 		}
 		let blockID = UUID()
-		let pageID = page.id
+		let pageID = hit.page.id
 		asking = Task { @MainActor in
 			defer { asking = nil }
 			do {
@@ -435,41 +436,6 @@ struct CanvasTabView: View {
 		}
 	}
 
-	// MARK: - 標記
-
-	/// 每個問過的塊：淡色框＋左上編號。這一題藍、其他紅；點編號切到那棵樹。
-	/// 框本身不吃觸控，筆照畫
-	private var blockMarks: some View {
-		let offset = scrollOffset
-		return ZStack(alignment: .topLeading) {
-			ForEach(Array(page.blocks.enumerated()), id: \.element.id) { index, block in
-				let rect = block.rect.offsetBy(dx: -offset.x, dy: -offset.y)
-				let current = block.cardID == openTopicID
-				let color: Color = current ? .accentColor : .red
-				RoundedRectangle(cornerRadius: 6)
-					.fill(color.opacity(0.06))
-					.overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(color.opacity(current ? 0.6 : 0.3)))
-					.frame(width: rect.width, height: rect.height)
-					.offset(x: rect.minX, y: rect.minY)
-					.allowsHitTesting(false)
-				Button {
-					open(block.cardID)
-				} label: {
-					Text("\(index + 1)")
-						.font(.caption2.weight(.bold))
-						.foregroundStyle(.white)
-						.frame(width: 22, height: 22)
-						.background(color, in: Circle())
-						.shadow(radius: 2, y: 1)
-				}
-				.buttonStyle(.plain)
-				.offset(x: rect.minX - 11, y: rect.minY - 11)
-			}
-		}
-		// 撐滿紙、靠左上：overlay 預設置中，ZStack 只有內容那麼大的話整組會被推到中間
-		.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-	}
-
 	private func open(_ id: UUID) {
 		openTopicID = id
 	}
@@ -479,8 +445,9 @@ struct CanvasTabView: View {
 	private var panel: some View {
 		VStack(spacing: 0) {
 			HStack(spacing: 10) {
-				if let openTopicID, let hit = page.blocks.firstIndex(where: { $0.cardID == openTopicID }) {
-					Text("第 \(pageIndex + 1) 頁 · 第 \(hit + 1) 塊")
+				if let openTopicID, let at = pages.firstIndex(where: { $0.blocks.contains { $0.cardID == openTopicID } }),
+					let hit = pages[at].blocks.firstIndex(where: { $0.cardID == openTopicID }) {
+					Text("第 \(at + 1) 頁 · 第 \(hit + 1) 塊")
 				} else {
 					Text("樹")
 				}
