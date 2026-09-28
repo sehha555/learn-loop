@@ -48,7 +48,8 @@ final class CardStore: ObservableObject {
 	let materialsDir: URL
 	private let defaults: UserDefaults
 
-	init() {
+	/// defaults 只給測試用：換一個乾淨的偏好設定，不動到真的
+	init(defaults: UserDefaults? = nil) {
 		let shared = FileManager.default.containerURL(
 			forSecurityApplicationGroupIdentifier: Self.appGroupID)
 		isShared = shared != nil
@@ -65,7 +66,7 @@ final class CardStore: ObservableObject {
 			at: imagesDir, withIntermediateDirectories: true)
 		try? FileManager.default.createDirectory(
 			at: materialsDir, withIntermediateDirectories: true)
-		defaults = UserDefaults(suiteName: Self.appGroupID) ?? .standard
+		self.defaults = defaults ?? UserDefaults(suiteName: Self.appGroupID) ?? .standard
 		load()
 		loadWiki()
 		loadChapters()
@@ -114,9 +115,20 @@ final class CardStore: ObservableObject {
 		set { defaults.set(newValue.rawValue, forKey: "teachingStyle") }
 	}
 
-	/// 畫布分頁：樹欄在紙的哪一邊（左撇子換到左邊）。存偏好，不是狀態
+	/// 慣用手，第一次打開 app 時問。nil = 還沒問過
+	var handedness: Handedness? {
+		get { defaults.string(forKey: "handedness").flatMap(Handedness.init(rawValue:)) }
+		set {
+			objectWillChange.send()
+			defaults.set(newValue?.rawValue, forKey: "handedness")
+			// 改了慣用手，側欄重新跟著它放（之前手動換過邊的作廢）
+			defaults.removeObject(forKey: "canvasPanelOnLeft")
+		}
+	}
+
+	/// 畫布：樹欄在紙的哪一邊。沒手動換過就放在慣用手的反邊（右撇子放左邊），寫字時手不會蓋住
 	var canvasPanelOnLeft: Bool {
-		get { defaults.bool(forKey: "canvasPanelOnLeft") }
+		get { defaults.object(forKey: "canvasPanelOnLeft") as? Bool ?? (handedness == .right) }
 		set { defaults.set(newValue, forKey: "canvasPanelOnLeft") }
 	}
 

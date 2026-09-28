@@ -7,6 +7,7 @@ struct SettingsView: View {
 	@State private var relayAddress = ""
 	@State private var relayToken = ""
 	@State private var style: TeachingStyle = .direct
+	@State private var hand: Handedness = .right
 
 	var body: some View {
 		NavigationStack {
@@ -46,6 +47,13 @@ struct SettingsView: View {
 				} footer: {
 					Text("兩種都分步驟。給提示：每步只講要做什麼、往哪走，不算完、不給結果，讓你自己算。直接給做法：每步寫到照著就能做。")
 				}
+				Section {
+					Picker("慣用手", selection: $hand) {
+						ForEach(Handedness.allCases, id: \.self) { Text($0.label).tag($0) }
+					}
+				} footer: {
+					Text("側邊的題目、講解放在另一邊，寫字時手不會擋住。")
+				}
 				if !store.isShared {
 					Section {
 						Text("目前是免費簽章，分享浮層和這裡各存各的樹。改用付費開發者帳號之後會自動合併。")
@@ -62,6 +70,7 @@ struct SettingsView: View {
 						store.relayAddress = relayAddress
 						store.relayToken = relayToken.trimmingCharacters(in: .whitespacesAndNewlines)
 						store.teachingStyle = style
+						if hand != store.handedness { store.handedness = hand }
 						dismiss()
 					}
 				}
@@ -71,6 +80,7 @@ struct SettingsView: View {
 				relayAddress = store.relayAddress
 				relayToken = store.relayToken
 				style = store.teachingStyle
+				hand = store.handedness ?? .right
 			}
 		}
 	}

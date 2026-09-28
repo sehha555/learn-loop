@@ -58,6 +58,8 @@ struct LibraryView: View {
 			}
 		}
 		.onAppear(perform: restore)
+		// 慣用手問卷還開著時不能再蓋一層，答完才打開上次那份
+		.onChange(of: store.handedness) { restore() }
 		.onChange(of: scenePhase) { _, phase in
 			if phase != .active { canvas.flushSaves() }
 		}
@@ -87,7 +89,7 @@ struct LibraryView: View {
 
 	/// 上次停在哪一頁（canvasPageID）→ 那份材料在哪個資料夾，打開它
 	private func restore() {
-		guard !restored else { return }
+		guard !restored, store.handedness != nil else { return }
 		restored = true
 		guard let pageID = UUID(uuidString: store.canvasPageID), let material = canvas.material(containing: pageID) else { return }
 		selection = material.folderID ?? Self.shelfID
