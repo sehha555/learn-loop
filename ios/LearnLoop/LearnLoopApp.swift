@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 struct LearnLoopApp: App {
 	@UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 	@StateObject private var store = CardStore()
+	@State private var tab = 0
+	/// 從別的 app「用 LearnLoop 打開」送來的 PDF，交給書架匯入
+	@State private var incomingPDF: URL?
 
 	init() {
 		// 主 app 的模型請求交給系統背景跑 —— 送出後切回 GoodNotes 也不會斷
@@ -25,15 +28,23 @@ struct LearnLoopApp: App {
 		WindowGroup {
 			// 題目和概念是兩個平等的視角，用 tab 一點就切 ——
 			// 藏在 toolbar 按鈕裡要推頁面進出，概念那頁就不會有人去看
-			TabView {
-				LibraryView(store: store)
+			TabView(selection: $tab) {
+				LibraryView(store: store, incomingPDF: $incomingPDF)
 					.tabItem { Label("書架", systemImage: "books.vertical") }
+					.tag(0)
 				TopicListView(store: store)
 					.tabItem { Label("題目", systemImage: "list.bullet") }
+					.tag(1)
 				AskTabView(store: store)
 					.tabItem { Label("概念", systemImage: "tag") }
+					.tag(2)
 				ExamListView(store: store)
 					.tabItem { Label("考試", systemImage: "calendar") }
+					.tag(3)
+			}
+			.onOpenURL { url in
+				tab = 0
+				incomingPDF = url
 			}
 			// 第一次打開先問慣用手
 			.fullScreenCover(isPresented: .constant(store.handedness == nil)) {

@@ -10,6 +10,7 @@ struct MaterialRoute: Identifiable, Hashable {
 /// 右邊之後（第 4 塊）上半會換成知識地圖，材料縮成下方一排
 struct LibraryView: View {
 	@ObservedObject var store: CardStore
+	@Binding var incomingPDF: URL?
 	@StateObject private var canvas: CanvasStore
 	/// 選中的資料夾；書架最上層用 shelfID 代表
 	@State private var selection: UUID? = LibraryView.shelfID
@@ -26,8 +27,9 @@ struct LibraryView: View {
 
 	static let shelfID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 
-	init(store: CardStore) {
+	init(store: CardStore, incomingPDF: Binding<URL?>) {
 		self.store = store
+		_incomingPDF = incomingPDF
 		_canvas = StateObject(wrappedValue: CanvasStore(dataDir: store.dataDir))
 	}
 
@@ -57,7 +59,11 @@ struct LibraryView: View {
 					.conceptDestinations(store: store) { materialPath.append($0) }
 			}
 		}
-		.onAppear(perform: restore)
+		.onAppear {
+			restore()
+			importIncoming()
+		}
+		.onChange(of: incomingPDF) { importIncoming() }
 		// 慣用手問卷還開著時不能再蓋一層，答完才打開上次那份
 		.onChange(of: store.handedness) { restore() }
 		.onChange(of: scenePhase) { _, phase in
@@ -85,6 +91,20 @@ struct LibraryView: View {
 			Text("刪了就找不回來，裡面的筆跡也會一起刪")
 		}
 		.errorAlert($errorText)
+	}
+
+	/// 從別的 app 打開的 PDF：放進書架最上層並直接打開。系統先把它複製到 Documents/Inbox，匯入後那份刪掉
+	private func importIncoming() {
+		guard let url = incomingPDF else { return }
+		incomingPDF = nil
+		do {
+			let material = try canvas.importMaterial(from: url, in: nil)
+			selection = Self.shelfID
+			opened = MaterialRoute(id: material.id)
+		} catch {
+			errorText = error.localizedDescription
+		}
+		if url.pathComponents.contains("Inbox") { try? FileManager.default.removeItem(at: url) }
 	}
 
 	/// 上次停在哪一頁（canvasPageID）→ 那份材料在哪個資料夾，打開它

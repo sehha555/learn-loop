@@ -43,6 +43,15 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: 連你自己 Mac 上的中繼站，用 Claude Code 處理截圖。
+        # 在檔案 app、Line、瀏覽器按「分享 → LearnLoop」打開 PDF，直接變成書架上的一份講義。
+        # 不就地開啟：系統先複製一份到 Documents/Inbox，匯入後刪掉
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: PDF
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.adobe.pdf
+        LSSupportsOpeningDocumentsInPlace: false
         # 四個方向都要支援，iPad 多工（Slide Over / 並排視窗）才會開放給這個 app
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
