@@ -20,7 +20,7 @@ enum CanvasTool: Equatable {
 		switch self {
 		case .pen(let index): PKInkingTool(.pen, color: Self.penColors[index], width: settings.penWidth)
 		case .marker: PKInkingTool(.marker, color: .systemYellow, width: 18)
-		case .eraser: PKEraserTool(.vector)
+		case .eraser: PKEraserTool(settings.eraseArea ? .bitmap : .vector, width: settings.eraserWidth)
 		case .lasso: PKLassoTool()
 		}
 	}
@@ -29,8 +29,12 @@ enum CanvasTool: Equatable {
 /// 工具的粗細等設定，三色筆共用一個粗細。存偏好，換工具不會重設
 struct CanvasToolSettings: Equatable {
 	static let penWidthRange: ClosedRange<CGFloat> = 1...12
+	static let eraserWidthRange: ClosedRange<CGFloat> = 4...60
 
 	var penWidth: CGFloat = 3.5
+	/// 橡皮擦：false＝碰到整筆消失，true＝只擦掉圈到的那一塊
+	var eraseArea = false
+	var eraserWidth: CGFloat = 20
 }
 
 /// 紙的白底＋淡橫線：跟內容一起捲，看得出寫到哪一行。墊講義的頁只留白底不畫線
@@ -81,6 +85,11 @@ final class PaperCanvasView: PKCanvasView {
 	/// 底圖在 content 座標裡佔的框（圈選時要連底圖一起裁）
 	var backgroundFrame: CGRect { backgroundView.frame }
 
+	/// 拿著橡皮擦時的擦除寬度，其他工具是 nil。擦的當下在筆尖畫一個這麼大的圈：
+	/// iPad Air 的 Pencil 不支援懸停，下筆前看不到範圍，至少擦的時候看得到
+	var eraserWidth: CGFloat?
+	private let eraserRing = UIView()
+
 	override init(frame: CGRect) {
 		super.init(frame: frame)
 		backgroundView.contentMode = .scaleAspectFit
@@ -89,6 +98,26 @@ final class PaperCanvasView: PKCanvasView {
 		isOpaque = false
 		insertSubview(linesView, at: 0)
 		insertSubview(backgroundView, at: 1)
+		eraserRing.isUserInteractionEnabled = false
+		eraserRing.isHidden = true
+		eraserRing.backgroundColor = UIColor.systemGray.withAlphaComponent(0.12)
+		eraserRing.layer.borderColor = UIColor.systemGray.cgColor
+		eraserRing.layer.borderWidth = 1.5
+		addSubview(eraserRing)
+		drawingGestureRecognizer.addTarget(self, action: #selector(trackEraser(_:)))
+	}
+
+	@objc private func trackEraser(_ gesture: UIGestureRecognizer) {
+		guard let eraserWidth, gesture.state == .began || gesture.state == .changed else {
+			eraserRing.isHidden = true
+			return
+		}
+		// 自己是 scroll view，location(in: self) 就是 content 座標，圈跟著內容捲
+		eraserRing.bounds.size = CGSize(width: eraserWidth, height: eraserWidth)
+		eraserRing.layer.cornerRadius = eraserWidth / 2
+		eraserRing.center = gesture.location(in: self)
+		eraserRing.isHidden = false
+		bringSubviewToFront(eraserRing)
 	}
 
 	required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -161,6 +190,7 @@ struct PencilCanvas: UIViewRepresentable {
 		view.isUserInteractionEnabled = interactive
 		let writing = interactive && penOn
 		view.drawingGestureRecognizer.isEnabled = writing
+		view.eraserWidth = writing && tool == .eraser ? settings.eraserWidth : nil
 		// 手指也能畫（模擬器）時 PencilKit 把捲動改成兩指；筆收起來就該一指捲
 		view.panGestureRecognizer.minimumNumberOfTouches = writing && view.drawingPolicy == .anyInput ? 2 : 1
 	}

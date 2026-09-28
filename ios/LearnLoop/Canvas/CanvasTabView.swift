@@ -15,6 +15,7 @@ struct CanvasTabView: View {
 	@State private var settings = CanvasToolSettings()
 	/// 再點一次已選中的筆：開粗細選單（值是哪一色的筆，popover 要掛在那顆上）
 	@State private var penMenu: Int?
+	@State private var eraserMenu = false
 	@State private var importing = false
 	/// 上次停的頁只在第一次出現時拉回來，之後切分頁回來維持當下
 	@State private var restoredPage = false
@@ -45,9 +46,11 @@ struct CanvasTabView: View {
 		self.store = store
 		_canvas = StateObject(wrappedValue: CanvasStore(dataDir: store.dataDir))
 		_penOn = State(initialValue: store.canvasPenOn)
-		if store.canvasPenWidth > 0 {
-			_settings = State(initialValue: CanvasToolSettings(penWidth: CGFloat(store.canvasPenWidth)))
-		}
+		var tools = CanvasToolSettings()
+		if store.canvasPenWidth > 0 { tools.penWidth = CGFloat(store.canvasPenWidth) }
+		if store.canvasEraserWidth > 0 { tools.eraserWidth = CGFloat(store.canvasEraserWidth) }
+		tools.eraseArea = store.canvasEraseArea
+		_settings = State(initialValue: tools)
 		_panelOnLeft = State(initialValue: store.canvasPanelOnLeft)
 		let saved = store.canvasPanelWidth
 		_panelWidth = State(initialValue: saved > 0 ? CGFloat(saved) : Self.defaultPanelWidth)
@@ -179,7 +182,12 @@ struct CanvasTabView: View {
 				barButton("螢光筆", systemImage: "highlighter", selected: tool == .marker, dot: .yellow) {
 					tool = .marker
 				}
-				barButton("橡皮擦", systemImage: "eraser", selected: tool == .eraser) { tool = .eraser }
+				// 點大小跟著擦除寬度；已選中再點一次開模式與大小
+				barButton("橡皮擦", systemImage: "eraser", selected: tool == .eraser,
+					dot: .gray, dotSize: 3 + settings.eraserWidth / 8) {
+					if tool == .eraser { eraserMenu = true } else { tool = .eraser }
+				}
+				.popover(isPresented: $eraserMenu) { eraserOptions }
 				barButton("套索", systemImage: "lasso", selected: tool == .lasso) { tool = .lasso }
 				barDivider
 				barButton("復原", systemImage: "arrow.uturn.backward", selected: false) {
@@ -207,6 +215,38 @@ struct CanvasTabView: View {
 					if !editing { store.canvasPenWidth = Double(settings.penWidth) }
 				}
 				Text(String(format: "%.1f pt", settings.penWidth))
+					.font(.caption.monospacedDigit())
+					.foregroundStyle(.secondary)
+					.frame(width: 46, alignment: .trailing)
+			}
+		}
+		.padding(16)
+		.frame(width: 260)
+		.presentationCompactAdaptation(.popover)
+	}
+
+	/// 橡皮擦：整筆擦／局部擦，加拖滑桿調大小（上面一個圈是實際大小）
+	private var eraserOptions: some View {
+		VStack(spacing: 12) {
+			Picker("擦法", selection: $settings.eraseArea) {
+				Text("整筆擦").tag(false)
+				Text("局部擦").tag(true)
+			}
+			.pickerStyle(.segmented)
+			.onChange(of: settings.eraseArea) { store.canvasEraseArea = settings.eraseArea }
+			Text(settings.eraseArea ? "只擦掉圈到的那一塊" : "碰到的那一筆整條消失")
+				.font(.caption)
+				.foregroundStyle(.secondary)
+			Circle()
+				.strokeBorder(Color.gray, lineWidth: 1.5)
+				.background(Circle().fill(Color.gray.opacity(0.12)))
+				.frame(width: settings.eraserWidth, height: settings.eraserWidth)
+				.frame(height: CanvasToolSettings.eraserWidthRange.upperBound)
+			HStack(spacing: 10) {
+				Slider(value: $settings.eraserWidth, in: CanvasToolSettings.eraserWidthRange, step: 1) { editing in
+					if !editing { store.canvasEraserWidth = Double(settings.eraserWidth) }
+				}
+				Text(String(format: "%.0f pt", settings.eraserWidth))
 					.font(.caption.monospacedDigit())
 					.foregroundStyle(.secondary)
 					.frame(width: 46, alignment: .trailing)

@@ -132,6 +132,18 @@ final class CardStore: ObservableObject {
 		set { defaults.set(newValue, forKey: "canvasPenWidth") }
 	}
 
+	/// 畫布分頁：橡皮擦只擦圈到的那塊（true）還是碰到整筆消失（false）
+	var canvasEraseArea: Bool {
+		get { defaults.bool(forKey: "canvasEraseArea") }
+		set { defaults.set(newValue, forKey: "canvasEraseArea") }
+	}
+
+	/// 畫布分頁：橡皮擦寬度（pt）。0 = 沒設過，用預設
+	var canvasEraserWidth: Double {
+		get { defaults.double(forKey: "canvasEraserWidth") }
+		set { defaults.set(newValue, forKey: "canvasEraserWidth") }
+	}
+
 	/// 畫布分頁：上次停在哪一頁（存頁的 id，插頁之後索引會變）
 	var canvasPageID: String {
 		get { defaults.string(forKey: "canvasPageID") ?? "" }
