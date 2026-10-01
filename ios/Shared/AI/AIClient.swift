@@ -48,6 +48,16 @@ struct AIClient {
 		}
 	}
 
+	/// 畫布圈完按的鈕。規格：不讓模型猜他要什麼——同一段手寫可能要批改，也可能要解釋概念
+	enum AskMode {
+		/// 截圖、直接問、分享進來：模型自己判斷
+		case auto
+		case explain
+		case grade
+		/// 圈了一塊、另外打字問
+		case question
+	}
+
 	// MARK: - 回覆的共用零件
 
 	struct Point: Decodable {
@@ -167,11 +177,28 @@ struct AIClient {
 	///   - understanding: 他問之前自己先寫的理解。有的話模型先診斷這段哪裡破，
 	///     status 針對那個洞講、stuck_skill 記洞的種類 —— 「留洞給他填」比反問更有用，
 	///     因為填的對不對是可驗證的。留空就是「直接告訴我」
+	///   - mode: 畫布圈選後按的是哪顆鈕。.auto = 其他入口（截圖、直接問、分享），模型自己判斷怎麼回
 	func ingest(
 		text: String, imageJPEG: Data?, understanding: String? = nil, hintConcept: String?,
-		knownConcepts: [String], knownChapters: [String], knownSkills: [String], style: TeachingStyle
+		knownConcepts: [String], knownChapters: [String], knownSkills: [String], style: TeachingStyle,
+		mode: AskMode = .auto
 	) async throws -> Ingested {
 		let hasImage = imageJPEG != nil
+		let prompt = Self.ingestPrompt(
+			text: text, hasImage: hasImage, understanding: understanding, hintConcept: hintConcept,
+			knownConcepts: knownConcepts, knownChapters: knownChapters, knownSkills: knownSkills,
+			style: style, mode: mode)
+		return try await call(
+			text: prompt, imageBase64: imageJPEG?.base64EncodedString(),
+			toolName: "record_answer", schema: Self.ingestSchema(withImage: hasImage))
+	}
+
+	/// 拆出來是為了測試：各模式的規則有沒有放對，不用真的打 AI
+	static func ingestPrompt(
+		text: String, hasImage: Bool, understanding: String?, hintConcept: String?,
+		knownConcepts: [String], knownChapters: [String], knownSkills: [String], style: TeachingStyle,
+		mode: AskMode
+	) -> String {
 		let understanding = understanding?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 		let reuseSkills = knownSkills.isEmpty
 			? ""
@@ -203,6 +230,9 @@ struct AIClient {
 		- "done"：寫完了，有完整的答案或結論。
 		- "blank"：只有題目、還沒開始算。
 
+
+		"""
+		prompt += mode != .auto ? Self.canvasAnswerRule(mode, reuseSkills: reuseSkills) : """
 		第三步，status 和 points，依 is_problem 分兩套：
 
 		A. is_problem 為 true（題目）：
@@ -239,6 +269,9 @@ struct AIClient {
 		""")
 
 		兩套都一樣：title 是一句話，不要在 title 裡回答它自己 —— 內容是他點下去才生的。
+		"""
+		prompt += """
+
 
 		第四步，concepts：這一題（或這個問題）用到的 1 到 4 個概念名，一定要給、不能空。
 		科目不限，粒度像教科書目錄的小節
@@ -290,9 +323,47 @@ struct AIClient {
 			他過去的章有：\(knownChapters.joined(separator: "、"))。chapter 有語意相同的務必重用原名。
 			"""
 		}
-		return try await call(
-			text: prompt, imageBase64: imageJPEG?.base64EncodedString(),
-			toolName: "record_answer", schema: Self.ingestSchema(withImage: hasImage))
+		return prompt
+	}
+
+	/// 畫布講解卡片用的第三步。跟 .auto 最大的差別是可以給答案：解題步驟在卡片上先藏著，
+	/// 他按「下一步」才一步步打開，所以 step 的 title 寫完整內容，不用再點一次叫模型展開。
+	/// status 一句一行：卡片一行一句排，之後長按一句可以追問那句
+	private static func canvasAnswerRule(_ mode: AskMode, reuseSkills: String) -> String {
+		let status = switch mode {
+		case .grade:
+			"""
+			- status：對照他手寫的過程批改，2 到 4 句。先說整體對不對；錯的話指出從哪一行開始錯、
+			  錯在哪裡、那一步應該怎麼想。全對就說對，再一句點出這題的關鍵。
+			  圖裡只有題目、沒有他的過程，就說還沒看到過程，再一句提示從哪裡下手。
+			"""
+		case .question:
+			"""
+			- status：回答他打的那句（問的是圖裡圈起來的內容），3 到 6 句。直接回答，不要反問。
+			"""
+		default:
+			"""
+			- status：講解圖裡圈起來的內容，3 到 6 句。是題目就講這題在考什麼、關鍵的想法是什麼；
+			  不是題目就講這段在說什麼、為什麼成立。
+			"""
+		}
+		let steps = mode == .question
+			? "- points：他問的是這題怎麼解才給解題步驟（規則見下面），其他情況給空陣列。"
+			: "- points：is_problem 為 true 時給這題完整的解題步驟；false 給空陣列。"
+		return """
+		第三步，status 和 points（他在紙上圈了一塊，按了「\(mode == .grade ? "批改" : mode == .question ? "打字問" : "解釋")」）：
+		\(status)
+		  直接對他說「你」，不要說「學生」、不要鼓勵。一句一行（句子之間換行、不要空行），每句只講一件事。
+		  用到的概念名用半形中括號標起來，例如「二極體導通時處在 [順向偏壓]」，名字跟 concepts 裡的寫法一字不差。
+		\(steps)
+		  解題步驟一律 kind="step"，2 到 6 步，依實際順序排列。title 是這一步的完整內容：
+		  一句話講完做什麼、得到什麼，算式和答案都可以寫（卡片上先藏著，他想好了才一步步打開）。
+		- stuck_step：is_problem 為 true 時，對照他寫的過程，points 裡第幾個 step 是他開始出錯或停下來的
+		  （1 起算），前面的步驟他已經做對。還沒動筆給 1；全對給 0；看不出來給 1。不是題目給 0。
+		- stuck_skill：他在 stuck_step 那一步栽掉時用的是哪個做題技巧，二到八個字
+		  （「換算上下限」「分母因式分解」「代值正負」）。只在看得出他真的做錯或停下時給；
+		  其他情況給空字串。\(reuseSkills)
+		"""
 	}
 
 	private static func ingestSchema(withImage: Bool) -> [String: Any] {

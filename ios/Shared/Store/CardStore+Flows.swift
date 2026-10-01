@@ -61,9 +61,10 @@ extension CardStore {
 	/// - understanding: 問概念時他先寫的理解（可空）。有的話模型針對理解的破洞答、並記標籤
 	/// - hintConcept: 在哪個概念頁問的，給模型當歸類提示
 	/// - blockID: 畫布圈選送的才有——對到畫布上那一塊；是題目就存成 .canvas 樹
+	/// - mode: 畫布圈完按的是 [解釋][批改][打字問] 哪一顆
 	func ingest(
 		text: String, image: UIImage?, understanding: String? = nil, hintConcept: String? = nil,
-		blockID: UUID? = nil
+		blockID: UUID? = nil, mode: AIClient.AskMode = .auto
 	) async throws -> UUID {
 		var imageData: Data?
 		if let image {
@@ -73,7 +74,7 @@ extension CardStore {
 		let result = try await ai.ingest(
 			text: text, imageJPEG: imageData, understanding: understanding, hintConcept: hintConcept,
 			knownConcepts: conceptNamesForPrompt(), knownChapters: knownChapters,
-			knownSkills: allStuckSkills(), style: teachingStyle)
+			knownSkills: allStuckSkills(), style: teachingStyle, mode: mode)
 		var tree = Card(title: "", kind: .free)
 		tree.blockID = blockID
 		Self.apply(result, text: text, understanding: understanding, to: &tree)
