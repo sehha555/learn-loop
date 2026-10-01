@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// 一份材料的畫布：在 app 裡直接手寫（取代 GoodNotes 的第一步），從書架點進來。
-/// 卡住時切「圈一題來問」拉一個框、按「問這一題」，框裡的筆跡走既有的 ingest；
+/// 卡住時切「圈一題來問」拉一個框、按 [解釋][批改][打字問]，框裡的筆跡走既有的 ingest；
 /// 回來的講解卡片浮在紙上（預設）或固定在側邊一欄，放慣用手的反邊。
 /// 每個問過的塊在紙上留編號標記，點了打開那張卡片。側欄可以拖寬、可以換邊
 struct MaterialView: View {
@@ -33,6 +33,10 @@ struct MaterialView: View {
 	/// 存 Task 是為了讓「取消」真的能中斷
 	@State private var asking: Task<Void, Never>?
 	@State private var errorText: String?
+	/// 按了 [打字問]：方框旁的按鈕換成輸入框
+	@State private var typing = false
+	@State private var typedQuestion = ""
+	@FocusState private var typingFocused: Bool
 
 	// 講解卡片
 	@State private var openTopicID: UUID?
@@ -337,6 +341,7 @@ struct MaterialView: View {
 		Button {
 			selecting.toggle()
 			selection = nil
+			typing = false
 		} label: {
 			Label(selecting ? "取消圈選" : "圈一題來問", systemImage: selecting ? "xmark" : "rectangle.dashed")
 				.font(.subheadline.weight(.semibold))
@@ -351,7 +356,7 @@ struct MaterialView: View {
 
 	// MARK: - 圈選
 
-	/// 透明一層接拖曳畫框；框拉完在框下浮出「問這一題」
+	/// 透明一層接拖曳畫框；框拉完在框下浮出 [解釋][批改][打字問]
 	private var selectionLayer: some View {
 		ZStack(alignment: .topLeading) {
 			Color.black.opacity(0.001)
@@ -360,6 +365,7 @@ struct MaterialView: View {
 					DragGesture(minimumDistance: 4, coordinateSpace: .local)
 						.onChanged { value in
 							guard asking == nil else { return }
+							typing = false
 							let origin = dragOrigin ?? value.startLocation
 							dragOrigin = origin
 							selection = CGRect(
@@ -379,35 +385,51 @@ struct MaterialView: View {
 					.allowsHitTesting(false)
 				if selection.width > 40, selection.height > 24 {
 					askPill
-						.offset(x: max(0, selection.maxX - 140), y: selection.maxY + 8)
+						.offset(x: max(0, selection.maxX - 300), y: selection.maxY + 8)
 				}
 			}
 		}
 	}
 
+	/// 不讓模型猜他要什麼：同一段手寫可能要批改、也可能要解釋概念，多點一下比猜錯多等一次好
 	private var askPill: some View {
 		HStack(spacing: 8) {
 			if let asking {
 				ProgressView().controlSize(.small)
 				Button("取消") { asking.cancel() }
-					.font(.subheadline.weight(.semibold))
+			} else if typing {
+				TextField("想問這塊的什麼…", text: $typedQuestion)
+					.frame(width: 220)
+					.focused($typingFocused)
+					.onAppear { typingFocused = true }
+					.onSubmit(askTyped)
+				Button("送出", action: askTyped)
+					.disabled(typedQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+				Button("返回") { typing = false }
+					.foregroundStyle(.secondary)
 			} else {
-				Button {
-					ask()
-				} label: {
-					Label("問這一題", systemImage: "pencil.and.outline")
-						.font(.subheadline.weight(.semibold))
-				}
+				Button("解釋") { ask(.explain) }
+				Divider().frame(height: 18)
+				Button("批改") { ask(.grade) }
+				Divider().frame(height: 18)
+				Button("打字問") { typing = true }
 			}
 		}
+		.font(.subheadline.weight(.semibold))
 		.padding(.horizontal, 14)
 		.padding(.vertical, 9)
 		.background(.thinMaterial, in: Capsule())
 		.overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.5)))
 	}
 
+	private func askTyped() {
+		let text = typedQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !text.isEmpty else { return }
+		ask(.question, text: text)
+	}
+
 	/// 框裡的筆跡鋪白底裁成圖，走統一入口。blockID 先產好，樹回來才對得上這一塊
-	private func ask() {
+	private func ask(_ mode: AIClient.AskMode, text: String = "") {
 		guard let selection, asking == nil else { return }
 		guard store.hasProvider else {
 			errorText = AIError.noAPIKey.localizedDescription
@@ -424,10 +446,12 @@ struct MaterialView: View {
 		asking = Task { @MainActor in
 			defer { asking = nil }
 			do {
-				let id = try await store.ingest(text: "", image: image, blockID: blockID)
+				let id = try await store.ingest(text: text, image: image, blockID: blockID, mode: mode)
 				canvas.addBlock(CanvasBlock(id: blockID, rect: rect, cardID: id), to: pageID)
 				selecting = false
 				self.selection = nil
+				typing = false
+				typedQuestion = ""
 				openTopicID = id
 			} catch {
 				guard !AIClient.isCancellation(error) else { return }

@@ -103,6 +103,7 @@ struct ExplainCard: View {
 			}
 			.controlSize(.small)
 		}
+		.frame(maxWidth: .infinity, alignment: .leading)
 		.padding(12)
 		.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
 	}
