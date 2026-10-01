@@ -2,12 +2,8 @@ import XCTest
 
 @testable import LearnLoop
 
-/// 講解卡片：一句一行、步驟一打開先亮幾步、[名詞] 去括號但數學式和區間不碰
+/// 講解卡片：步驟一打開先亮幾步、[名詞] 去括號但數學式和區間不碰
 final class ExplainCardTests: XCTestCase {
-	func testSentencesSkipBlankLines() {
-		XCTAssertEqual(ExplainCard.sentences("第一句。\n\n  第二句。 \n"), ["第一句。", "第二句。"])
-	}
-
 	func testInitiallyShownFollowsStuckStep() {
 		XCTAssertEqual(ExplainCard.initiallyShown(stuckStep: nil, count: 4), 0, "舊卡、看不出來：全藏")
 		XCTAssertEqual(ExplainCard.initiallyShown(stuckStep: 1, count: 4), 0, "第一步就卡：全藏")

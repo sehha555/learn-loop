@@ -9,7 +9,6 @@ struct ExplainCard: View {
 
 	/// 打開了幾步。用 .id(topicID) 換卡時重來
 	@State private var shownSteps: Int?
-	@State private var question = ""
 	/// 正在答的追問；存 Task 是為了讓「取消」真的能中斷
 	@State private var answering: [UUID: Task<Void, Never>] = [:]
 	@State private var errorText: String?
@@ -32,7 +31,8 @@ struct ExplainCard: View {
 				}
 			}
 			Divider()
-			askBar
+			FollowUpBar(running: !answering.isEmpty, onCancel: { answering.values.forEach { $0.cancel() } }, onSubmit: ask)
+				.padding(10)
 		}
 		.errorAlert($errorText)
 	}
@@ -41,22 +41,9 @@ struct ExplainCard: View {
 
 	private func explanation(_ topic: Card) -> some View {
 		VStack(alignment: .leading, spacing: 8) {
-			ForEach(Array(Self.sentences(topic.body ?? "").enumerated()), id: \.offset) { _, line in
-				MathText(text: ConceptMarkup.plain(line), font: .body, size: 17)
-			}
-			if let note = topic.fallbackNote {
-				Label(note, systemImage: "icloud.and.arrow.down")
-					.font(.caption2)
-					.foregroundStyle(.orange)
-			}
+			StructuredText(text: ConceptMarkup.plain(topic.body ?? ""))
+			if let note = topic.fallbackNote { FallbackNote(note: note) }
 		}
-	}
-
-	/// 一行一句；模型偶爾多空一行，空行不算一句
-	static func sentences(_ body: String) -> [String] {
-		body.components(separatedBy: "\n")
-			.map { $0.trimmingCharacters(in: .whitespaces) }
-			.filter { !$0.isEmpty }
 	}
 
 	// MARK: - 解題步驟
@@ -83,11 +70,7 @@ struct ExplainCard: View {
 					VStack(alignment: .leading, spacing: 4) {
 						MathText(text: ConceptMarkup.plain(step.title), font: .body, size: 17)
 						// 舊的畫布卡：步驟標題底下可能有之前點開的內容
-						if let body = step.body {
-							ForEach(Array(StructuredBody.blocks(of: body).joined().enumerated()), id: \.offset) { _, line in
-								StructuredLine(line)
-							}
-						}
+						if let body = step.body { StructuredText(text: body) }
 					}
 				}
 			}
@@ -120,14 +103,10 @@ struct ExplainCard: View {
 					Image(systemName: "questionmark.bubble")
 				}
 				if let body = card.body {
-					ForEach(Array(StructuredBody.blocks(of: body).joined().enumerated()), id: \.offset) { _, line in
-						StructuredLine(line)
-					}
-				} else if let task = answering[card.id] {
-					HStack(spacing: 8) {
-						ProgressView().controlSize(.small)
-						Button("取消") { task.cancel() }.font(.caption)
-					}
+					StructuredText(text: body)
+				} else if answering[card.id] != nil {
+					// 取消在底部輸入列
+					ProgressView().controlSize(.small)
 				} else {
 					Button("沒答到，再問一次") { answer(card.id) }.font(.caption)
 				}
@@ -136,37 +115,44 @@ struct ExplainCard: View {
 		}
 	}
 
-	private var askBar: some View {
-		HStack(spacing: 8) {
-			TextField("接著問…", text: $question, axis: .vertical)
-				.lineLimit(1...4)
-				.textFieldStyle(.roundedBorder)
-				.onSubmit(ask)
-			Button(action: ask) {
-				Image(systemName: "arrow.up.circle.fill").font(.title2)
-			}
-			.disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-			.accessibilityLabel("送出")
-		}
-		.padding(10)
+	/// 打的字和貼的圖都掛在新的追問上，跟題目樹的追問同一套
+	private func ask(_ text: String, image: UIImage?) {
+		let imageData = image.flatMap(AIClient.jpeg(from:))
+		let title = text.isEmpty ? "這張圖在講什麼？" : text
+		guard let id = store.addCustom(topicID: topicID, parentID: nil, title: title) else { return }
+		if let imageData { store.saveImage(imageData, for: id) }
+		answer(id, imageJPEG: imageData)
 	}
 
-	private func ask() {
-		let typed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !typed.isEmpty, let id = store.addCustom(topicID: topicID, parentID: nil, title: typed) else { return }
-		question = ""
-		answer(id)
-	}
-
-	private func answer(_ cardID: UUID) {
+	private func answer(_ cardID: UUID, imageJPEG: Data? = nil) {
 		answering[cardID] = Task { @MainActor in
 			defer { answering[cardID] = nil }
 			do {
-				try await store.answer(cardID: cardID, in: topicID)
+				try await store.answer(cardID: cardID, in: topicID, imageJPEG: imageJPEG)
 			} catch {
 				guard !AIClient.isCancellation(error) else { return }
 				errorText = error.localizedDescription
 			}
+		}
+	}
+}
+
+/// 卡片底部的追問輸入。自己管打的字：打字時只重畫這一列，不重排整張卡片
+private struct FollowUpBar: View {
+	var running: Bool
+	var onCancel: () -> Void
+	var onSubmit: (String, UIImage?) -> Void
+
+	@State private var text = ""
+	@State private var image: UIImage?
+
+	var body: some View {
+		AskField(
+			text: $text, image: $image, placeholder: "接著問…", running: running, onCancel: onCancel
+		) {
+			onSubmit(text.trimmingCharacters(in: .whitespacesAndNewlines), image)
+			text = ""
+			image = nil
 		}
 	}
 }

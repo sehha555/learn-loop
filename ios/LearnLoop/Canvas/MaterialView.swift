@@ -35,22 +35,16 @@ struct MaterialView: View {
 	@State private var errorText: String?
 	/// 按了 [打字問]：方框旁的按鈕換成輸入框
 	@State private var typing = false
-	@State private var typedQuestion = ""
-	@FocusState private var typingFocused: Bool
 
 	// 講解卡片
 	@State private var openTopicID: UUID?
 	@State private var floating: Bool
-	/// 浮動卡片左上角在紙上的位置。nil = 還沒拖過，放慣用手反邊靠上
-	@State private var cardOrigin: CGPoint?
-	@State private var dragBaseOrigin: CGPoint?
 	@State private var panelOnLeft: Bool
 	@State private var panelWidth: CGFloat
 	@State private var dragBaseWidth: CGFloat?
 
 	private static let defaultPanelWidth: CGFloat = 440
 	private static let panelRange: ClosedRange<CGFloat> = 320...640
-	private static let floatingSize = CGSize(width: 400, height: 560)
 
 	init(store: CardStore, canvas: CanvasStore, materialID: UUID) {
 		self.store = store
@@ -158,7 +152,7 @@ struct MaterialView: View {
 	/// 紙頂的細工具列（照 Derive）：拿筆／收起筆、三色筆、螢光筆、橡皮擦、套索、復原重做、圈一題。
 	/// 筆收起來只剩「拿筆」和「圈一題」；圈選中只剩「取消圈選」
 	private var penBar: some View {
-		// 放得下就置中；樹欄開著放不下時筆那段左右滑，「圈一題」固定在右邊不被擠出去
+		// 放得下就置中；側欄開著放不下時筆那段左右滑，「圈一題」固定在右邊不被擠出去
 		ViewThatFits(in: .horizontal) {
 			barCapsule {
 				penTools
@@ -398,21 +392,13 @@ struct MaterialView: View {
 				ProgressView().controlSize(.small)
 				Button("取消") { asking.cancel() }
 			} else if typing {
-				TextField("想問這塊的什麼…", text: $typedQuestion)
-					.frame(width: 220)
-					.focused($typingFocused)
-					.onAppear { typingFocused = true }
-					.onSubmit(askTyped)
-				Button("送出", action: askTyped)
-					.disabled(typedQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-				Button("返回") { typing = false }
-					.foregroundStyle(.secondary)
+				TypedQuestionField(onSubmit: { ask(.question, text: $0) }, onBack: { typing = false })
 			} else {
-				Button("解釋") { ask(.explain) }
+				Button(AIClient.AskMode.explain.label) { ask(.explain) }
 				Divider().frame(height: 18)
-				Button("批改") { ask(.grade) }
+				Button(AIClient.AskMode.grade.label) { ask(.grade) }
 				Divider().frame(height: 18)
-				Button("打字問") { typing = true }
+				Button(AIClient.AskMode.question.label) { typing = true }
 			}
 		}
 		.font(.subheadline.weight(.semibold))
@@ -422,13 +408,7 @@ struct MaterialView: View {
 		.overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.5)))
 	}
 
-	private func askTyped() {
-		let text = typedQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !text.isEmpty else { return }
-		ask(.question, text: text)
-	}
-
-	/// 框裡的筆跡鋪白底裁成圖，走統一入口。blockID 先產好，樹回來才對得上這一塊
+	/// 框裡的筆跡鋪白底裁成圖，走統一入口。blockID 先產好，卡片回來才對得上這一塊
 	private func ask(_ mode: AIClient.AskMode, text: String = "") {
 		guard let selection, asking == nil else { return }
 		guard store.hasProvider else {
@@ -451,7 +431,6 @@ struct MaterialView: View {
 				selecting = false
 				self.selection = nil
 				typing = false
-				typedQuestion = ""
 				openTopicID = id
 			} catch {
 				guard !AIClient.isCancellation(error) else { return }
@@ -494,61 +473,26 @@ struct MaterialView: View {
 		VStack(spacing: 0) {
 			cardHeader
 			Divider()
-			if let openTopicID {
-				// 概念 chip 的跳轉走外層的 NavigationStack
-				ExplainCard(store: store, topicID: openTopicID).id(openTopicID)
-			}
+			if let openTopicID { explainCard(openTopicID) }
 		}
 		.frame(width: panelWidth)
 		.background(Color(.systemBackground))
 	}
 
-	/// 浮在紙上的卡片：拖標題列移動。外面這層不吃觸控，筆照樣能在卡片外寫
+	/// 概念 chip 的跳轉走外層的 NavigationStack
+	private func explainCard(_ topicID: UUID) -> some View {
+		ExplainCard(store: store, topicID: topicID).id(topicID)
+	}
+
 	private func floatingCard(_ topicID: UUID) -> some View {
-		GeometryReader { geo in
-			let size = CGSize(
-				width: min(Self.floatingSize.width, geo.size.width - 24),
-				height: min(Self.floatingSize.height, geo.size.height - 24))
-			let origin = clamped(cardOrigin ?? defaultCardOrigin(in: geo.size, card: size), in: geo.size, card: size)
-			VStack(spacing: 0) {
-				cardHeader
-					.contentShape(Rectangle())
-					.gesture(
-						DragGesture()
-							.onChanged { value in
-								let base = dragBaseOrigin ?? origin
-								dragBaseOrigin = base
-								cardOrigin = clamped(
-									CGPoint(x: base.x + value.translation.width, y: base.y + value.translation.height),
-									in: geo.size, card: size)
-							}
-							.onEnded { _ in dragBaseOrigin = nil }
-					)
-				Divider()
-				ExplainCard(store: store, topicID: topicID).id(topicID)
-			}
-			.frame(width: size.width, height: size.height)
-			.background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14))
-			.clipShape(RoundedRectangle(cornerRadius: 14))
-			.overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(.separator).opacity(0.5)))
-			.shadow(color: .black.opacity(0.15), radius: 14, y: 4)
-			.offset(x: origin.x, y: origin.y)
+		FloatingCard(startOnLeft: panelOnLeft) {
+			cardHeader
+		} content: {
+			explainCard(topicID)
 		}
 	}
 
-	/// 慣用手的反邊、工具列底下
-	private func defaultCardOrigin(in area: CGSize, card: CGSize) -> CGPoint {
-		CGPoint(x: panelOnLeft ? 12 : area.width - card.width - 12, y: 56)
-	}
-
-	/// 整張卡留在紙的範圍內（鍵盤跳出來時範圍變矮，卡片往上讓）
-	private func clamped(_ point: CGPoint, in area: CGSize, card: CGSize) -> CGPoint {
-		CGPoint(
-			x: min(max(point.x, 0), max(area.width - card.width, 0)),
-			y: min(max(point.y, 0), max(area.height - card.height, 0)))
-	}
-
-	/// 紙和樹之間的把手：拖了改樹欄寬度，放手存起來
+	/// 紙和側欄之間的把手：拖了改側欄寬度，放手存起來
 	private var divider: some View {
 		Rectangle()
 			.fill(Color(.systemGroupedBackground))
@@ -571,5 +515,88 @@ struct MaterialView: View {
 						store.canvasPanelWidth = Double(panelWidth)
 					}
 			)
+	}
+}
+
+/// 方框旁的打字問：自己管打的字，打字時只重畫這一小塊，不動整個畫布畫面
+private struct TypedQuestionField: View {
+	var onSubmit: (String) -> Void
+	var onBack: () -> Void
+
+	@State private var text = ""
+	@FocusState private var focused: Bool
+
+	private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+	var body: some View {
+		TextField("想問這塊的什麼…", text: $text)
+			.frame(width: 220)
+			.focused($focused)
+			.onAppear { focused = true }
+			.onSubmit(submit)
+		Button("送出", action: submit)
+			.disabled(trimmed.isEmpty)
+		Button("返回", action: onBack)
+			.foregroundStyle(.secondary)
+	}
+
+	private func submit() {
+		guard !trimmed.isEmpty else { return }
+		onSubmit(trimmed)
+	}
+}
+
+/// 浮在紙上的卡片：拖標題列移動。位置自己管——拖的時候只重畫這張卡，不重跑整個畫布畫面。
+/// 外面這層不吃觸控，筆照樣能在卡片外寫
+private struct FloatingCard<Header: View, Content: View>: View {
+	/// 一打開放哪邊：慣用手的反邊
+	var startOnLeft: Bool
+	@ViewBuilder var header: Header
+	@ViewBuilder var content: Content
+
+	/// 左上角在紙上的位置。nil = 還沒拖過，放預設位置
+	@State private var origin: CGPoint?
+	@State private var dragBase: CGPoint?
+
+	private static var maxSize: CGSize { CGSize(width: 400, height: 560) }
+
+	var body: some View {
+		GeometryReader { geo in
+			let size = CGSize(
+				width: min(Self.maxSize.width, geo.size.width - 24),
+				height: min(Self.maxSize.height, geo.size.height - 24))
+			let start = CGPoint(x: startOnLeft ? 12 : geo.size.width - size.width - 12, y: 56)
+			let current = clamped(origin ?? start, in: geo.size, card: size)
+			VStack(spacing: 0) {
+				header
+					.contentShape(Rectangle())
+					.gesture(
+						DragGesture()
+							.onChanged { value in
+								let base = dragBase ?? current
+								dragBase = base
+								origin = clamped(
+									CGPoint(x: base.x + value.translation.width, y: base.y + value.translation.height),
+									in: geo.size, card: size)
+							}
+							.onEnded { _ in dragBase = nil }
+					)
+				Divider()
+				content
+			}
+			.frame(width: size.width, height: size.height)
+			.background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14))
+			.clipShape(RoundedRectangle(cornerRadius: 14))
+			.overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(.separator).opacity(0.5)))
+			.shadow(color: .black.opacity(0.15), radius: 14, y: 4)
+			.offset(x: current.x, y: current.y)
+		}
+	}
+
+	/// 整張卡留在紙的範圍內（鍵盤跳出來時範圍變矮，卡片往上讓）
+	private func clamped(_ point: CGPoint, in area: CGSize, card: CGSize) -> CGPoint {
+		CGPoint(
+			x: min(max(point.x, 0), max(area.width - card.width, 0)),
+			y: min(max(point.y, 0), max(area.height - card.height, 0)))
 	}
 }

@@ -211,6 +211,19 @@ enum StructuredBody {
 
 }
 
+/// 一整段 body：切塊、一行一行照講義體畫。樹頁、概念頁、畫布講解卡片共用
+struct StructuredText: View {
+	let text: String
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 6) {
+			ForEach(Array(StructuredBody.blocks(of: text).joined().enumerated()), id: \.offset) { _, line in
+				StructuredLine(line)
+			}
+		}
+	}
+}
+
 /// 講義體的一行：## 小標、$$ 獨立式子、- 條列、關鍵是：結尾，其餘是一般句子。
 /// 樹頁展開內容和概念頁「問過的」共用 —— 模型給哪種版面記號，兩邊都要畫得出來
 struct StructuredLine: View {

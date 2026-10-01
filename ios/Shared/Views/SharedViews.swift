@@ -165,6 +165,17 @@ struct PastedImage: Transferable {
 	}
 }
 
+/// 中繼站失敗退回雲端的提示 —— 不再靜默，答案風格不同或沒看到圖時知道是為什麼
+struct FallbackNote: View {
+	let note: String
+
+	var body: some View {
+		Label(note, systemImage: "icloud.and.arrow.down")
+			.font(.caption2)
+			.foregroundStyle(.orange)
+	}
+}
+
 /// 問問題的輸入列：貼圖、打字、送出，進行中可取消。
 /// 題目 tab、概念 tab、概念頁、樹頁追問四處共用 —— 之前各寫一份，
 /// 結果「追問不能貼圖」「這邊有取消那邊沒有」這種不對稱一直冒出來

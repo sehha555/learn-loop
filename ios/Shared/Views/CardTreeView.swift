@@ -105,7 +105,7 @@ struct CardTreeView: View {
 				MathText(text: body, font: .headline, size: 17)
 			}
 			if let note = topic.fallbackNote {
-				fallbackLabel(note)
+				FallbackNote(note: note)
 			}
 			if let transcript = topic.transcript {
 				transcriptBlock(transcript, topicID: topic.id)
@@ -270,7 +270,7 @@ struct CardTreeView: View {
 							.padding(.leading, 22)
 					}
 					if let note = card.fallbackNote {
-						fallbackLabel(note)
+						FallbackNote(note: note)
 							.padding(.leading, 22)
 					}
 					if card.kind == .custom, let topic {
@@ -281,13 +281,6 @@ struct CardTreeView: View {
 			}
 		}
 		.padding(.vertical, 3)
-	}
-
-	/// 中繼站失敗退回雲端的提示 —— 不再靜默，答案風格不同或沒看到圖時知道是為什麼
-	private func fallbackLabel(_ note: String) -> some View {
-		Label(note, systemImage: "icloud.and.arrow.down")
-			.font(.caption2)
-			.foregroundStyle(.orange)
 	}
 
 	/// 模型答題時順便判斷這問答是不是概念層的知識；這裡顯示判斷結果，判錯可以改。

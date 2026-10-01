@@ -56,6 +56,15 @@ struct AIClient {
 		case grade
 		/// 圈了一塊、另外打字問
 		case question
+
+		/// 畫布上那顆鈕的字，prompt 也照這個告訴模型他按了哪顆
+		var label: String {
+			switch self {
+			case .auto, .explain: "解釋"
+			case .grade: "批改"
+			case .question: "打字問"
+			}
+		}
 	}
 
 	// MARK: - 回覆的共用零件
@@ -232,44 +241,9 @@ struct AIClient {
 
 
 		"""
-		prompt += mode != .auto ? Self.canvasAnswerRule(mode, reuseSkills: reuseSkills) : """
-		第三步，status 和 points，依 is_problem 分兩套：
-
-		A. is_problem 為 true（題目）：
-		- status：依狀態寫一句話，直接對他說「你」：
-		  stuck → 講他卡在哪一步，然後給下一步「該想什麼」的方向；
-		  done → 講他這段在幹嘛，哪一行開始歪掉就指出是哪一行，但不說為什麼錯；
-		  blank → 講這題在問什麼、可以從哪裡下手看。
-		  他有打字的話，優先回應他打的那句。
-		  絕對不要直接給答案或算給他看，給了他就變成抄的。
-		  只寫一句。不要講解、不要列步驟、不要鼓勵、不要說「學生」。
-		- points：先給 2 到 4 個 kind="step" 的點，是這題客觀上要走的解題步驟，依實際順序排列
-		  （不是猜他想問什麼，是這題真的要走的路）。title 是這一步要做什麼，一句話。
-		  視情況再補 0 到 2 個 kind="supplement"（這題沒寫到但接得上）/
-		  "trap"（這裡常見錯）/ "extend"（更難或更一般的版本），沒有就不要硬湊。
-		- stuck_step：對照他寫的過程，points 裡第幾個 step 是他開始出錯或停下來的（1 起算），
-		  前面的步驟他已經做對、不用再講。blank（還沒動筆）給 1；done 且全對給 0；
-		  沒有圖或看不出來給 1。
-		- stuck_skill：他在 stuck_step 那一步栽掉時用的是哪個做題技巧，二到八個字
-		  （「換算上下限」「分母因式分解」「代值正負」）。只在看得出他真的做錯或停下時給；
-		  blank、全對、或看不出來就給空字串。\(reuseSkills)
-
-		B. is_problem 為 false（他在問東西）：
-		\(style.askStatusRule)
-		  kind 用 question（要先弄懂的子問題）
-		  / supplement（接得上的補充）/ trap（常見誤解）/ extend（更一般的版本）。
-		  只是一份筆記、抽不出要問的點，points 就給空陣列，不要硬猜。
-		\(understanding.isEmpty ? "  stuck_skill 給空字串。" : """
-		  他先寫下了自己的理解（見上面引號），先診斷那段理解的破洞在哪：
-		  是把它當公式背沒推導、把兩個東西混在一起、少了一個前提、還是其實是對的。
-		  status 針對那個洞講，不要泛泛重講一遍整個概念；他理解對的部分一句帶過。
-		  points 也從那個洞出發，不是概念的通用介紹。
-		  stuck_skill：那個洞是哪一種，二到八個字（「當公式背沒推導」「混淆定義與性質」「漏掉前提」）；
-		  他的理解沒問題就給空字串。\(reuseSkills)
-		""")
-
-		兩套都一樣：title 是一句話，不要在 title 裡回答它自己 —— 內容是他點下去才生的。
-		"""
+		prompt += mode == .auto
+			? Self.autoAnswerRule(style: style, understanding: understanding, reuseSkills: reuseSkills)
+			: Self.canvasAnswerRule(mode, reuseSkills: reuseSkills)
 		prompt += """
 
 
@@ -326,6 +300,48 @@ struct AIClient {
 		return prompt
 	}
 
+	/// 截圖、直接問、分享進來的第三步：題目不給答案、提問照口吻走
+	private static func autoAnswerRule(style: TeachingStyle, understanding: String, reuseSkills: String) -> String {
+		"""
+		第三步，status 和 points，依 is_problem 分兩套：
+
+		A. is_problem 為 true（題目）：
+		- status：依狀態寫一句話，直接對他說「你」：
+		  stuck → 講他卡在哪一步，然後給下一步「該想什麼」的方向；
+		  done → 講他這段在幹嘛，哪一行開始歪掉就指出是哪一行，但不說為什麼錯；
+		  blank → 講這題在問什麼、可以從哪裡下手看。
+		  他有打字的話，優先回應他打的那句。
+		  絕對不要直接給答案或算給他看，給了他就變成抄的。
+		  只寫一句。不要講解、不要列步驟、不要鼓勵、不要說「學生」。
+		- points：先給 2 到 4 個 kind="step" 的點，是這題客觀上要走的解題步驟，依實際順序排列
+		  （不是猜他想問什麼，是這題真的要走的路）。title 是這一步要做什麼，一句話。
+		  視情況再補 0 到 2 個 kind="supplement"（這題沒寫到但接得上）/
+		  "trap"（這裡常見錯）/ "extend"（更難或更一般的版本），沒有就不要硬湊。
+		- stuck_step：對照他寫的過程，points 裡第幾個 step 是他開始出錯或停下來的（1 起算），
+		  前面的步驟他已經做對、不用再講。blank（還沒動筆）給 1；done 且全對給 0；
+		  沒有圖或看不出來給 1。
+		- stuck_skill：他在 stuck_step 那一步栽掉時用的是哪個做題技巧，二到八個字
+		  （「換算上下限」「分母因式分解」「代值正負」）。只在看得出他真的做錯或停下時給；
+		  blank、全對、或看不出來就給空字串。\(reuseSkills)
+
+		B. is_problem 為 false（他在問東西）：
+		\(style.askStatusRule)
+		  kind 用 question（要先弄懂的子問題）
+		  / supplement（接得上的補充）/ trap（常見誤解）/ extend（更一般的版本）。
+		  只是一份筆記、抽不出要問的點，points 就給空陣列，不要硬猜。
+		\(understanding.isEmpty ? "  stuck_skill 給空字串。" : """
+		  他先寫下了自己的理解（見上面引號），先診斷那段理解的破洞在哪：
+		  是把它當公式背沒推導、把兩個東西混在一起、少了一個前提、還是其實是對的。
+		  status 針對那個洞講，不要泛泛重講一遍整個概念；他理解對的部分一句帶過。
+		  points 也從那個洞出發，不是概念的通用介紹。
+		  stuck_skill：那個洞是哪一種，二到八個字（「當公式背沒推導」「混淆定義與性質」「漏掉前提」）；
+		  他的理解沒問題就給空字串。\(reuseSkills)
+		""")
+
+		兩套都一樣：title 是一句話，不要在 title 裡回答它自己 —— 內容是他點下去才生的。
+		"""
+	}
+
 	/// 畫布講解卡片用的第三步。跟 .auto 最大的差別是可以給答案：解題步驟在卡片上先藏著，
 	/// 他按「下一步」才一步步打開，所以 step 的 title 寫完整內容，不用再點一次叫模型展開。
 	/// status 一句一行：卡片一行一句排，之後長按一句可以追問那句
@@ -341,7 +357,7 @@ struct AIClient {
 			"""
 			- status：回答他打的那句（問的是圖裡圈起來的內容），3 到 6 句。直接回答，不要反問。
 			"""
-		default:
+		case .auto, .explain:
 			"""
 			- status：講解圖裡圈起來的內容，3 到 6 句。是題目就講這題在考什麼、關鍵的想法是什麼；
 			  不是題目就講這段在說什麼、為什麼成立。
@@ -351,7 +367,7 @@ struct AIClient {
 			? "- points：他問的是這題怎麼解才給解題步驟（規則見下面），其他情況給空陣列。"
 			: "- points：is_problem 為 true 時給這題完整的解題步驟；false 給空陣列。"
 		return """
-		第三步，status 和 points（他在紙上圈了一塊，按了「\(mode == .grade ? "批改" : mode == .question ? "打字問" : "解釋")」）：
+		第三步，status 和 points（他在紙上圈了一塊，按了「\(mode.label)」）：
 		\(status)
 		  直接對他說「你」，不要說「學生」、不要鼓勵。一句一行（句子之間換行、不要空行），每句只講一件事。
 		  用到的概念名用半形中括號標起來，例如「二極體導通時處在 [順向偏壓]」，名字跟 concepts 裡的寫法一字不差。
