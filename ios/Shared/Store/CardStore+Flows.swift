@@ -85,6 +85,47 @@ extension CardStore {
 		return tree.id
 	}
 
+	/// 展開樹裡的一個點（點步驟、自己打的問題、追問都走這條），答完寫回節點。
+	/// 題目樹和畫布的講解卡片共用。轉圈、錯誤提示留給畫面管
+	func answer(cardID: UUID, in topicID: UUID, imageJPEG: Data? = nil) async throws {
+		guard let topic = topics.first(where: { $0.id == topicID }), let card = topic.find(cardID),
+			let path = topic.path(to: cardID)
+		else { return }
+		let result = try await ai.expand(
+			topic: topicContext(topic),
+			diagnosis: topic.body ?? "",
+			transcript: topic.transcript,
+			explained: topic.explainedLines(),
+			path: Array(path.dropFirst()), // 第一個是題目本身，模型已經知道
+			style: teachingStyle,
+			// 自己打的問題才判斷屬於哪個概念；清單是全部既有概念，這題的放前面
+			conceptChoices: card.kind == .custom ? conceptChoices(for: topic) : [],
+			imageJPEG: imageJPEG
+		)
+		// 知識點樹裡問的，判回同一個概念就不用再標
+		let concept = (topic.kind == .note && result.concept == topic.title) ? nil : result.concept
+		if let figure = result.figureData { saveFigure(figure, for: cardID) }
+		expand(cardID: cardID, body: result.body, noteConcept: concept, fallbackNote: result.fallbackNote)
+	}
+
+	/// 送給模型的「題目」欄：知識點樹與直接問的樹沒有題目，講清楚它是什麼
+	func topicContext(_ topic: Card) -> String {
+		switch topic.kind {
+		case .note: "概念「\(topic.title)」的知識問題，不針對特定題目"
+		case .free: "他直接問的問題（沒有特定題目）：\(topic.problem ?? topic.title)"
+		default: topic.asked.map { "\(topic.title)（他貼題目時說：\($0)）" } ?? topic.title
+		}
+	}
+
+	/// 這題的概念放前面，再接其他既有概念
+	func conceptChoices(for topic: Card) -> [String] {
+		var names = topic.concepts
+		for name in conceptNamesForPrompt() where !names.contains(name) {
+			names.append(name)
+		}
+		return names
+	}
+
 	/// 根問題改了重送：整棵重生（種類、開場句、點、概念都可能換），id 與圖不變
 	func reask(topicID: UUID, text: String) async throws {
 		reasking.insert(topicID)

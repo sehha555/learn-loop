@@ -274,7 +274,7 @@ struct CardTreeView: View {
 							.padding(.leading, 22)
 					}
 					if card.kind == .custom, let topic {
-						moveToNoteMenu(card, concepts: conceptChoices(for: topic))
+						moveToNoteMenu(card, concepts: store.conceptChoices(for: topic))
 							.padding(.leading, 22)
 					}
 				}
@@ -532,7 +532,7 @@ struct CardTreeView: View {
 		defer { for step in steps { running[step.id] = nil } }
 		do {
 			let result = try await store.ai.expandSteps(
-				topic: topicContext(topic), diagnosis: topic.body ?? "",
+				topic: store.topicContext(topic), diagnosis: topic.body ?? "",
 				transcript: topic.transcript, steps: steps.map(\.title))
 			for (index, step) in steps.enumerated() {
 				// 對回去：標題一樣的優先，模型改了字就照順序
@@ -555,14 +555,6 @@ struct CardTreeView: View {
 			let index = topic.children.filter({ $0.kind == .step }).firstIndex(where: { $0.id == step.id })
 		else { return false }
 		return index + 1 < stuck
-	}
-
-	private func conceptChoices(for topic: Card) -> [String] {
-		var names = topic.concepts
-		for name in store.conceptNamesForPrompt() where !names.contains(name) {
-			names.append(name)
-		}
-		return names
 	}
 
 	// MARK: - 改問題重送
@@ -609,39 +601,14 @@ struct CardTreeView: View {
 		}
 	}
 
-	/// 送給模型的「題目」欄：知識點樹與直接問的樹沒有題目，講清楚它是什麼
-	private func topicContext(_ topic: Card) -> String {
-		switch topic.kind {
-		case .note: "概念「\(topic.title)」的知識問題，不針對特定題目"
-		case .free: "他直接問的問題（沒有特定題目）：\(topic.problem ?? topic.title)"
-		default: topic.asked.map { "\(topic.title)（他貼題目時說：\($0)）" } ?? topic.title
-		}
-	}
-
 	/// 標 MainActor 是為了讓 Task 的第一步一定是切回主執行緒 ——
 	/// 這個 suspension 保證 start 那行把 Task 存進 running 之後，defer 才有機會清掉它
 	@MainActor
 	private func expand(_ card: Card, imageJPEG: Data? = nil) async {
-		guard let topic, let path = topic.path(to: card.id) else { return }
+		guard let topic else { return }
 		defer { running[card.id] = nil }
 		do {
-			let result = try await store.ai.expand(
-				topic: topicContext(topic),
-				diagnosis: topic.body ?? "",
-				transcript: topic.transcript,
-				explained: topic.explainedLines(),
-				path: Array(path.dropFirst()), // 第一個是題目本身，模型已經知道
-				style: store.teachingStyle,
-				// 自己打的問題才判斷屬於哪個概念；清單是全部既有概念，這題的放前面
-				conceptChoices: card.kind == .custom ? conceptChoices(for: topic) : [],
-				imageJPEG: imageJPEG
-			)
-			// 知識點樹裡問的，判回同一個概念就不用再標
-			let concept = (topic.kind == .note && result.concept == topic.title) ? nil : result.concept
-			if let figure = result.figureData { store.saveFigure(figure, for: card.id) }
-			store.expand(
-				cardID: card.id, body: result.body, noteConcept: concept,
-				fallbackNote: result.fallbackNote)
+			try await store.answer(cardID: card.id, in: topic.id, imageJPEG: imageJPEG)
 			// 剛講完的東西就是下一個問題最可能接的地方
 			attachID = card.id
 		} catch {
