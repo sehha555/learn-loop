@@ -127,6 +127,12 @@ final class CardStore: ObservableObject {
 	/// 畫布：樹欄放在慣用手的反邊（右撇子放左邊），寫字時手不會蓋住。畫布上臨時換邊不存
 	var canvasPanelOnLeft: Bool { handedness == .right }
 
+	/// 畫布的講解卡片浮在紙上（預設），還是固定在側邊一欄
+	var canvasCardFloating: Bool {
+		get { defaults.object(forKey: "canvasCardFloating") as? Bool ?? true }
+		set { defaults.set(newValue, forKey: "canvasCardFloating") }
+	}
+
 	/// 畫布分頁：筆開著（出筆工具列、Pencil 畫線）還是關著（只看、手指捲）。沒設過＝開
 	var canvasPenOn: Bool {
 		get { defaults.object(forKey: "canvasPenOn") as? Bool ?? true }

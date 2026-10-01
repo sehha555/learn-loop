@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 
 /// 一份材料的畫布：在 app 裡直接手寫（取代 GoodNotes 的第一步），從書架點進來。
 /// 卡住時切「圈一題來問」拉一個框、按「問這一題」，框裡的筆跡走既有的 ingest；
-/// 送出後紙留一邊、樹開另一邊，手不用離開紙。每個問過的塊在紙上留編號標記，點了切到那棵樹。
-/// 樹欄可以拖寬、可以換邊（左撇子）
+/// 回來的講解卡片浮在紙上（預設）或固定在側邊一欄，放慣用手的反邊。
+/// 每個問過的塊在紙上留編號標記，點了打開那張卡片。側欄可以拖寬、可以換邊
 struct MaterialView: View {
 	@ObservedObject var store: CardStore
 	@ObservedObject var canvas: CanvasStore
@@ -34,14 +34,19 @@ struct MaterialView: View {
 	@State private var asking: Task<Void, Never>?
 	@State private var errorText: String?
 
-	// 樹欄
+	// 講解卡片
 	@State private var openTopicID: UUID?
+	@State private var floating: Bool
+	/// 浮動卡片左上角在紙上的位置。nil = 還沒拖過，放慣用手反邊靠上
+	@State private var cardOrigin: CGPoint?
+	@State private var dragBaseOrigin: CGPoint?
 	@State private var panelOnLeft: Bool
 	@State private var panelWidth: CGFloat
 	@State private var dragBaseWidth: CGFloat?
 
 	private static let defaultPanelWidth: CGFloat = 440
 	private static let panelRange: ClosedRange<CGFloat> = 320...640
+	private static let floatingSize = CGSize(width: 400, height: 560)
 
 	init(store: CardStore, canvas: CanvasStore, materialID: UUID) {
 		self.store = store
@@ -57,6 +62,7 @@ struct MaterialView: View {
 		tools.eraseArea = store.canvasEraseArea
 		_settings = State(initialValue: tools)
 		_panelOnLeft = State(initialValue: store.canvasPanelOnLeft)
+		_floating = State(initialValue: store.canvasCardFloating)
 		let saved = store.canvasPanelWidth
 		_panelWidth = State(initialValue: saved > 0 ? CGFloat(saved) : Self.defaultPanelWidth)
 	}
@@ -65,12 +71,12 @@ struct MaterialView: View {
 
 	var body: some View {
 		HStack(spacing: 0) {
-			if openTopicID != nil, panelOnLeft {
+			if openTopicID != nil, !floating, panelOnLeft {
 				panel
 				divider
 			}
 			paper
-			if openTopicID != nil, !panelOnLeft {
+			if openTopicID != nil, !floating, !panelOnLeft {
 				divider
 				panel
 			}
@@ -114,6 +120,8 @@ struct MaterialView: View {
 			// 紙頂一條細工具列：頂端那排跟 iPad 的分頁列同一排，放不下
 			.overlay(alignment: .top) { penBar.padding(.top, 2).padding(.horizontal, 12) }
 			.ignoresSafeArea(.keyboard)
+			// 放在 ignoresSafeArea 外面：鍵盤跳出來時這層變矮，卡片跟著往上讓，輸入框不被蓋住
+			.overlay { if floating, let openTopicID { floatingCard(openTopicID) } }
 	}
 
 	/// 頁碼、翻頁、加頁、總覽，收在工具列右邊
@@ -428,36 +436,92 @@ struct MaterialView: View {
 		}
 	}
 
-	// MARK: - 樹欄
+	// MARK: - 講解卡片
 
-	private var panel: some View {
-		VStack(spacing: 0) {
-			HStack(spacing: 10) {
-				if let openTopicID, let at = pages.firstIndex(where: { $0.blocks.contains { $0.cardID == openTopicID } }),
-					let hit = pages[at].blocks.firstIndex(where: { $0.cardID == openTopicID }) {
-					Text("第 \(at + 1) 頁 · 第 \(hit + 1) 塊")
-				} else {
-					Text("樹")
-				}
-				Spacer()
+	/// 標題列：第幾頁第幾塊、浮動／固定切換、收起。固定時多一顆換邊
+	private var cardHeader: some View {
+		HStack(spacing: 10) {
+			if let openTopicID, let at = pages.firstIndex(where: { $0.blocks.contains { $0.cardID == openTopicID } }),
+				let hit = pages[at].blocks.firstIndex(where: { $0.cardID == openTopicID }) {
+				Text("第 \(at + 1) 頁 · 第 \(hit + 1) 塊")
+			} else {
+				Text("講解")
+			}
+			Spacer()
+			if !floating {
 				Button(panelOnLeft ? "換到右邊" : "換到左邊", systemImage: "arrow.left.arrow.right") {
 					panelOnLeft.toggle()
 				}
-				// 字跟「換到左右邊」一樣大：只放 X 太小，看不出能收
-				Button("收起", systemImage: "xmark") { openTopicID = nil }
 			}
-			.font(.caption)
-			.foregroundStyle(.secondary)
-			.padding(.horizontal, 12)
-			.padding(.vertical, 8)
+			Button(floating ? "固定在側邊" : "浮動", systemImage: floating ? "sidebar.left" : "rectangle.on.rectangle") {
+				floating.toggle()
+				store.canvasCardFloating = floating
+			}
+			// 字跟其他鈕一樣大：只放 X 太小，看不出能收。收起後點紙上的編號再打開
+			Button("收起", systemImage: "xmark") { openTopicID = nil }
+		}
+		.font(.caption)
+		.foregroundStyle(.secondary)
+		.padding(.horizontal, 12)
+		.padding(.vertical, 8)
+	}
+
+	private var panel: some View {
+		VStack(spacing: 0) {
+			cardHeader
 			Divider()
 			if let openTopicID {
-				// 直接放樹；概念 chip 的跳轉走外層的 NavigationStack
-				CardTreeView(topicID: openTopicID, store: store)
+				// 概念 chip 的跳轉走外層的 NavigationStack
+				ExplainCard(store: store, topicID: openTopicID).id(openTopicID)
 			}
 		}
 		.frame(width: panelWidth)
 		.background(Color(.systemBackground))
+	}
+
+	/// 浮在紙上的卡片：拖標題列移動。外面這層不吃觸控，筆照樣能在卡片外寫
+	private func floatingCard(_ topicID: UUID) -> some View {
+		GeometryReader { geo in
+			let size = CGSize(
+				width: min(Self.floatingSize.width, geo.size.width - 24),
+				height: min(Self.floatingSize.height, geo.size.height - 24))
+			let origin = clamped(cardOrigin ?? defaultCardOrigin(in: geo.size, card: size), in: geo.size, card: size)
+			VStack(spacing: 0) {
+				cardHeader
+					.contentShape(Rectangle())
+					.gesture(
+						DragGesture()
+							.onChanged { value in
+								let base = dragBaseOrigin ?? origin
+								dragBaseOrigin = base
+								cardOrigin = clamped(
+									CGPoint(x: base.x + value.translation.width, y: base.y + value.translation.height),
+									in: geo.size, card: size)
+							}
+							.onEnded { _ in dragBaseOrigin = nil }
+					)
+				Divider()
+				ExplainCard(store: store, topicID: topicID).id(topicID)
+			}
+			.frame(width: size.width, height: size.height)
+			.background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14))
+			.clipShape(RoundedRectangle(cornerRadius: 14))
+			.overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(.separator).opacity(0.5)))
+			.shadow(color: .black.opacity(0.15), radius: 14, y: 4)
+			.offset(x: origin.x, y: origin.y)
+		}
+	}
+
+	/// 慣用手的反邊、工具列底下
+	private func defaultCardOrigin(in area: CGSize, card: CGSize) -> CGPoint {
+		CGPoint(x: panelOnLeft ? 12 : area.width - card.width - 12, y: 56)
+	}
+
+	/// 整張卡留在紙的範圍內（鍵盤跳出來時範圍變矮，卡片往上讓）
+	private func clamped(_ point: CGPoint, in area: CGSize, card: CGSize) -> CGPoint {
+		CGPoint(
+			x: min(max(point.x, 0), max(area.width - card.width, 0)),
+			y: min(max(point.y, 0), max(area.height - card.height, 0)))
 	}
 
 	/// 紙和樹之間的把手：拖了改樹欄寬度，放手存起來
